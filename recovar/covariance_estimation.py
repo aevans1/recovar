@@ -57,12 +57,15 @@ def set_covariance_options(args, options):
 
 
 from recovar import core
-def greedy_column_choice(sampling_vec, n_samples, volume_shape, avoid_in_radius = 1):
+def greedy_column_choice(sampling_vec, n_samples, volume_shape, avoid_in_radius = 1, keep_only_below_freq = 32):
     if avoid_in_radius < 0 or avoid_in_radius > 20:
         raise ValueError("avoid_in_radius should be between 0 and 20")
 
     if n_samples < 1 or n_samples > sampling_vec.size:
         raise ValueError("n_samples should be between 1 and the size of sampling_vec")
+
+    radial_distances = ftu.get_grid_of_radial_distances(volume_shape)
+    sampling_vec *= radial_distances.reshape(-1) < keep_only_below_freq
 
     sorted_idx = jnp.argsort(-sampling_vec)
     sorted_idx = np.array(sorted_idx)
@@ -1107,8 +1110,9 @@ vmap_compute_spline_coefficients = jax.vmap(cryojax_map_coordinates.compute_spli
 
 def compute_spline_coeffs_in_batch(basis, volume_shape, gpu_memory= None):
     gpu_memory = utils.get_gpu_memory_total() if gpu_memory is None else gpu_memory
-
     vol_batch_size = utils.get_vol_batch_size(volume_shape[0], gpu_memory=gpu_memory)
+    logger.info(f"memory used = {gpu_memory}, vol_batch_size in compute_spline_coeffs_in_batch {vol_batch_size}")
+    utils.report_memory_device(logger=logger)
     coeffs = []
     for k in range(0, basis.shape[0], vol_batch_size):
         coeffs.append(np.array(vmap_compute_spline_coefficients(basis[k:k+vol_batch_size].reshape(-1, *volume_shape))))
