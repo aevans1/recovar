@@ -62,41 +62,25 @@ def try_new_stuff(recovar_result_dir, output_folder = None, zdim = 4, no_z_reg =
     if zdim is None and len(po.get('zs')) > 1:
         logger.error("z-dim is not set, and multiple zs are found. You need to specify zdim with e.g. --zdim=4")
         raise Exception("z-dim is not set, and multiple zs are found. You need to specify zdim with e.g. --z-dim=4")
-    
-    elif zdim is None:
-        zdim = list(po.get('zs').keys())[0]
-        logger.info(f"using zdim={zdim}")
-    zdim_key = f"{zdim}_noreg" if no_z_reg else zdim
 
-
-    if output_folder is None:
-        output_folder = recovar_result_dir + f'/output/analysis_{zdim_key}/' 
-
-    # Make folder for outputs
-    # For now, this reloads the folder already made by the deconvolution stuff
-    output_folder_deconv_density = output_folder + 'deconv_density/'
-    print(output_folder_deconv_density)
-    save_file = output_folder_deconv_density + 'results.pkl'
-
-    deconvolve_info = utils.pickle_load(save_file)
-    grids_inp = deconvolve_info['grids']
-    zs = po.get('zs')[zdim_key]
-    cov_zs =  po.get('cov_zs')[zdim_key]
-
+    zs = po.get('zs')[zdim]
+    cov_zs =  po.get('cov_zs')[zdim]
     cov_zs_norm = np.linalg.norm(cov_zs, axis=(-1,-2), ord = 2)
     good_zs = cov_zs_norm >np.percentile(cov_zs_norm, percentile_reject)
-    zdim = pca_dim_max
+    
     zs = zs[good_zs][:,:zdim]
     cov_zs = cov_zs[good_zs][:,:zdim,:zdim]
 
     import json
-    with open('/mnt/home/levans/Projects/Model_bias_heterogeneity/Igg/output_adjusted_test/output/analysis_2/path1/path.json') as f:
+    with open('/mnt/home/levans/Projects/Model_bias_heterogeneity/Igg/output_vonmises/analysis_10/path0/path.json') as f:
         data = json.load(f)
         path = np.array(data["path"])
     print(path.shape)
     #centers = np.loadtxt("/mnt/home/levans/Projects/Model_bias_heterogeneity/Igg/output_adjusted_test/output/analysis_2/centers.txt")
     #print(centers.shape) 
     #centers = centers[:, :2]
+    print(f"path shape: {path.shape}")
+    print(f"zs shape: {zs.shape}")
     log_likelihood = latent_density.compute_latent_log_likelihood(path, zs, cov_zs)
     #log_likelihood = compute_latent_log_likelihood(path, zs, cov_zs)
 
@@ -217,5 +201,5 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     args = add_args(parser).parse_args()
     #deconvolve_latent_density(args.result_dir, output_folder=args.outdir)
-    plot_deconv_on_path(args.result_dir, output_folder=args.outdir)
-    #try_new_stuff(args.result_dir, output_folder=args.outdir)
+    #plot_deconv_on_path(args.result_dir, output_folder=args.outdir)
+    try_new_stuff(args.result_dir, output_folder=args.outdir, zdim=args.zdim)
