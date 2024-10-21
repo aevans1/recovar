@@ -52,25 +52,28 @@ Also:
 [contact](#contact)
 
 ## Installation 
-To run this code, CUDA and [JAX](https://jax.readthedocs.io/en/latest/index.html#) are required. See information about JAX installation [here](https://jax.readthedocs.io/en/latest/installation.html).
-Assuming you already have CUDA, installation should take less than 5 minutes.
-Below are a set of commands which runs on our university cluster (Della), but may need to be tweaked to run on other clusters.
+CUDA and [JAX](https://jax.readthedocs.io/en/latest/index.html#) are required to run this code. JAX will be installed by the command below, and the cudatoolkit is now included, but you need to have the CUDA drivers installed, see info here about JAX installation [here](https://jax.readthedocs.io/en/latest/installation.html).
+Assuming you already have CUDA drivers (probably already installed on your cluster), installation should take less than 5 minutes.
+<!-- Below are a set of commands which runs on our university cluster (Della), but may need to be tweaked to run on other clusters.
 You may need to load CUDA before installing JAX, E.g., on our university cluster with
 
-    module load cudatoolkit/12.3
+    module load cudatoolkit/12.3 -->
 
-Then create an environment, download JAX-cuda (for some reason the latest version is causing issues, so make sure to use 0.4.23), clone the directory and install the requirements (note the --no-deps flag. This is because of some conflict with dependencies of cryodrgn. Will fix it soon.).
+<!-- Then create an environment, download JAX-cuda (for some reason the latest version is causing issues, so make sure to use 0.4.23), clone the directory and install the requirements (note the --no-deps flag. This is because of some conflict with dependencies of cryodrgn. Will fix it soon.). -->
+If you have an internet connection, you can copy paste the following commands below and should be good to go. It clones (downloads) this github repo, creates a python virtual environement to run the code in, and installs the required dependencies.
 
-    conda create --name recovar python=3.11
-    conda activate recovar
-    pip install -U "jax[cuda12_pip]"==0.4.23 -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
     git clone https://github.com/ma-gilles/recovar.git
-    pip install --no-deps -r  recovar/recovar_install_requirements.txt
-    python -m ipykernel install --user --name=recovar 
+    cd recovar
+    conda init
+    conda create --name recovar python=3.11 -y
+    conda activate recovar
+    pip install --upgrade "jax[cuda12]"==0.4.34 --no-input
+    pip install -r recovar_install_requirements.txt --no-input 
+    pip install --no-deps cryodrgn==2.3.0 --no-input
+    python -m ipykernel install --user --name=recovar
 
-
-
-It is recommanded to test your installation before running on a real dataset, see [Testing your installation](#small-test-dataset).
+After this, you should do `conda activate recovar` and run the commands described below.
+It is recommended to test your installation before running on a real dataset, see [Testing your installation](#small-test-dataset).
 
 <!-- The code was tested on [this commit](https://github.com/ma-gilles/recovar/commit/6388bcc8646c535ae1b121952aa5c04e52402455).
 
@@ -188,7 +191,7 @@ Example usage for a .cs file:
 
 A real space mask is important to boost SNR. Most consensus reconstruction software output a mask, which you can use as input (`--mask=path_to_mask.mrc`). Make sure the mask is not too tight; you can use the input `--dilate-mask-iter` to expand the mask if needed. You may also want to use a focusing mask to focus on heterogeneity in one part of the volume [click here](https://guide.cryosparc.com/processing-data/tutorials-and-case-studies/mask-selection-and-generation-in-ucsf-chimera) to find instructions to generate one with Chimera.
 
-If you don't input a mask, you can ask the software to estimate one using the two halfmaps of the mean ( `--mask=from-halfmaps`). You may also want to run with a loose spherical mask (option `--mask=sphere`) and use the computed variance map to observe which parts have large variance.
+If you don't input a mask, you can ask the software to estimate one using the two halfmaps of the mean ( `--mask=from_halfmaps`). You may also want to run with a loose spherical mask (option `--mask=sphere`) and use the computed variance map to observe which parts have large variance.
 
 
 
@@ -366,46 +369,173 @@ python compute_state.py [pipeline_output_dir] -o [volume_output_dir] --latent-po
 
 ### Generating and Analyzing Trajectories in Latent Space
 
-To compute a high density/low free energy trajectory in latent space and generate corresponding volumes, use the following command:
+To compute a high-density (low free energy) trajectory in latent space and generate corresponding volumes, use the `compute_trajectory.py` script.
+
+**Command**:
 
 ```bash
-python compute_trajectory.py [pipeline_output_dir] -o [volume_output_dir] --latent-points [zfiles.txt] --zdim [dimension] --n-vols-along-path [num_vols] --density [density.pkl] --kmeans-ind [indices] --endpts [endpoints.txt] --Bfactor [Bfac]
+python compute_trajectory.py [pipeline_output_dir] -o [volume_output_dir] --zdim [dimension] [options]
 ```
 
 #### Positional Arguments:
 
-- **`result_dir`**:  
-  The output directory provided to the pipeline using the `--o` option. This is where results will be saved. For analysis, the default directory is `result_dir/output/analysis_[zdim]`.
+- **`result_dir`**:
+  The output directory provided to `pipeline.py` using the `-o` option. This is where the results from `pipeline.py` are stored.
 
 #### Required Arguments:
 
-- **`--zdim ZDIM`**:  
-  Dimension of the latent variable (a single integer). It specifies the latent space dimension used in the analysis.
-- **`--latent-points LATENT_POINTS`**:  
-  Path to the latent points file in `.txt` format. This file should be readable by `np.loadtxt` and contain coordinates in latent space.
+- **`-o OUTDIR, --outdir OUTDIR`**:
+  Output directory to save all results. This is a **required** argument.
 
-<details><summary>Optional Arguments</summary>
+- **`--zdim ZDIM`**:
+  Dimension of the latent variable (a single integer). This should match the `zdim` used in the pipeline.
 
-- **`-o, --outdir OUTDIR`**:  
-  Output directory to save all results. If not specified, it defaults to `result_dir/output/analysis_[zdim]`.
-- **`--n-vols-along-path N_VOLS_ALONG_PATH`**:  
-  Number of volumes to compute along each trajectory. Default is 6.
-- **`--density DENSITY`**:  
-  Path to a density file saved in `.pkl` format. The dictionary in this file should include 'density' and 'latent_space_bounds', as generated by `estimate_conformational_density.pkl`
-- **`--kmeans-ind KMEANS_IND`**:  
-  Indices of k-means centers to use as endpoints. Should be a list of integers, specified as a comma-separated string. Example: `1,2,3`.
-- **`--endpts ENDPTS_FILE`**:  
-  File containing endpoints. Should be a `.txt` file with two rows for z values or a `.pkl` file if using k-means results.
-- **`--Bfactor BFACTOR`**:  
-  B-factor for sharpening. Default is 0 (no sharpening).
-- **`--n-bins N_BINS`**:  
+#### Endpoint Specification (One of the following is required):
+
+To define the start and end points of the trajectory in latent space, you need to specify endpoints using one of the following options:
+
+- **`--ind IND`**:
+  Indices of points in the list of coordinates to use as endpoints. Provide indices as a comma-separated list, e.g., `--ind 0,1`.
+
+  This option is used in conjunction with the `--endpts` option.
+
+- **`--endpts ENDPTS_FILE`**:
+  Path to a file containing endpoint coordinates in latent space. The file should be a `.txt` file with at least two rows, each containing the coordinates of an endpoint. If the file has more than two lines, it will use the first two lines as endpoints by default. If you want to specify different lines, use the `--ind` option to specify the indices of the lines to use.
+
+- **`--z_st Z_ST_FILE`** and **`--z_end Z_END_FILE`**:
+  Paths to files containing the starting point (`z_st`) and ending point (`z_end`) coordinates in latent space, respectively. Each file should be a `.txt` file containing a single row of coordinates.
+
+#### Optional Arguments:
+
+- **`--density DENSITY`**:
+  Path to the density file saved in `.pkl` format, containing keys `'density'` and `'latent_space_bounds'`. This is typically generated by `estimate_conformational_density.py`, e.g., `density/deconv_density_knee.pkl`.
+
+- **`--n-vols-along-path N_VOLS_ALONG_PATH`**:
+  Number of volumes to compute along the trajectory. Default is 6.
+
+- **`--Bfactor BFACTOR`**:
+  B-factor for sharpening. The B-factor of the consensus reconstruction is a good estimate. Default is 0 (no sharpening).
+
+- **`--n-bins N_BINS`**:
   Number of bins for kernel regression. Default is 50.
-- **`--no-z-regularization`**:  
-  Disable z regularization if needed.
 
-</details>
+- **`--maskrad-fraction MASKRAD_FRACTION`**:
+  Radius of mask used in kernel regression. Default is 20, which means `radius = grid_size / 20` pixels, or `grid_size * voxel_size / 20` Å.
 
-## Extracting image subset based on volumes 
+- **`--n-min-images N_MIN_IMAGES`**:
+  Minimum number of images required for kernel regression. Default is 100 for SPA data.
+
+- **`--lazy`**:
+  Use lazy loading if the dataset is too large to fit in memory.
+
+- **`--particles PARTICLES`**:
+  Path to the particle stack dataset. If not specified, the same stack used in `pipeline.py` will be used. Use this option if you want to use a higher-resolution stack.
+
+- **`--datadir DATADIR`**:
+  Path prefix to particle stack if loading relative paths from a `.star` or `.cs` file.
+
+- **`--zdim1`**:
+  Enable this if using a 1-dimensional latent space. This addresses a specific issue with `np.loadtxt`.
+
+- **`--override_z_regularization`**:
+  Override the `z` regularization setting from the pipeline. Use with caution.
+
+#### Examples:
+
+1. **Compute trajectory using indices in a coordinate file**:
+
+   If you have a coordinate file (e.g., `kmeans_center_coords.txt` generated by `analyze.py`), you can specify which lines (points) to use as endpoints using `--ind`.
+
+   ```bash
+   python compute_trajectory.py [pipeline_output_dir] -o [volume_output_dir] --zdim [dimension] \
+       --density [density.pkl] --endpts kmeans_center_coords.txt --ind 0,1
+   ```
+
+   This will use the first two lines (indices 0 and 1) in `kmeans_center_coords.txt` as the endpoints.
+
+2. **Compute trajectory using endpoint coordinates from a file**:
+
+   If your endpoint file has exactly two lines, you can simply specify:
+
+   ```bash
+   python compute_trajectory.py [pipeline_output_dir] -o [volume_output_dir] --zdim [dimension] \
+       --density [density.pkl] --endpts endpoints.txt
+   ```
+
+   If the file has more than two lines, and you want to use specific lines, use `--ind` to specify the indices.
+
+3. **Compute trajectory using specific start and end point files**:
+
+   If you have separate `.txt` files for the starting point (`z_st.txt`) and ending point (`z_end.txt`):
+
+   ```bash
+   python compute_trajectory.py [pipeline_output_dir] -o [volume_output_dir] --zdim [dimension] \
+       --density [density.pkl] --z_st z_st.txt --z_end z_end.txt
+   ```
+
+#### Additional Notes:
+
+- The `--density` option is important if you want to compute trajectories that follow regions of high conformational density (low free energy). The density file can be generated using `estimate_conformational_density.py`.
+
+- Ensure that the `zdim` matches the dimension used in the pipeline and in density estimation.
+
+- The volumes generated along the trajectory will be saved in the specified output directory (`--outdir`), typically under subdirectories like `vol0000`, `vol0001`, etc.
+
+#### Help Message:
+
+For more details and options, you can view the help message by running:
+
+```bash
+python compute_trajectory.py -h
+```
+
+**Help Output:**
+
+```
+usage: compute_trajectory.py [-h] -o OUTDIR [--zdim ZDIM] [--Bfactor BFACTOR] [--n-bins N_BINS]
+                             [--maskrad-fraction MASKRAD_FRACTION] [--n-min-images N_MIN_IMAGES] [--zdim1]
+                             [--no-z-regularization] [--override_z_regularization] [--lazy]
+                             [--particles PARTICLES] [--datadir DATADIR] [--n-vols-along-path N_VOLS_ALONG_PATH]
+                             [--density DENSITY] [--ind IND] [--endpts ENDPTS_FILE]
+                             [--z_st Z_ST_FILE] [--z_end Z_END_FILE]
+                             result_dir
+
+positional arguments:
+  result_dir            Output directory provided to pipeline.py using the --o option.
+
+optional arguments:
+  -h, --help            Show this help message and exit.
+  -o OUTDIR, --outdir OUTDIR
+                        Output directory to save all outputs. This is a required argument.
+  --zdim ZDIM           Dimension of latent variable (a single int, not a list). Must match the zdim used in the pipeline.
+  --Bfactor BFACTOR     B-factor sharpening. The B-factor of the consensus reconstruction is probably a good guess. Default is 0, which means no sharpening.
+  --n-bins N_BINS       Number of bins for kernel regression. Default is 50 and works well for most cases.
+  --maskrad-fraction MASKRAD_FRACTION
+                        Radius of mask used in kernel regression. Default = 20, which means radius = grid_size/20 pixels, or grid_size * voxel_size / 20 angstrom.
+  --n-min-images N_MIN_IMAGES
+                        Minimum number of images to compute kernel regression. Default = 100 for SPA, and 10 particles for tilt series.
+  --zdim1               Enable if using a 1-dimensional latent space. Addresses an issue with np.loadtxt.
+  --no-z-regularization
+                        Use unregularized latent variables. This should be consistent with how the density was estimated.
+  --override_z_regularization
+                        Override the z regularization setting from the pipeline. Use with caution.
+  --lazy                Use lazy loading if the dataset is too large to fit in memory.
+  --particles PARTICLES
+                        Particle stack dataset. If not specified, the same stack as provided to pipeline.py will be used. Use this option if you want to use a higher resolution stack.
+  --datadir DATADIR     Path prefix to particle stack if loading relative paths from a .star or .cs file.
+  --n-vols-along-path N_VOLS_ALONG_PATH
+                        Number of volumes to compute along each trajectory (default 6)
+  --density DENSITY     Density saved in pkl file, keys are 'density' and 'latent_space_bounds'.
+  --ind IND             Indices of points in the list of coordinates to use as endpoints. Provide as a comma-separated list, e.g., --ind 0,1.
+  --endpts ENDPTS_FILE  Endpoints file (txt). If it has more than 2 lines, it will use the first two lines as endpoints. If you want to specify different lines, use --ind.
+  --z_st Z_ST_FILE      Starting point file (txt).
+  --z_end Z_END_FILE    Ending point file (txt).
+```
+
+---
+
+## Extracting image subset based on volumes
+
 
 ### Overview
 
@@ -625,106 +755,167 @@ Below is the updated directory tree structure (click to expand):
 
 ```
 .
-├── command.txt
-├── model
-│   ├── covariance_cols.pkl
-│   ├── embeddings.pkl
-│   ├── halfsets.pkl
-│   ├── params.pkl
-│   └── particles_halfsets.pkl
-├── output
-│   ├── volumes
-│   │   ├── dilated_mask.mrc
-│   │   ├── eigen_neg0000.mrc
-│   │   ├── eigen_neg0001.mrc
-│   │   ├── ...
-│   │   ├── eigen_pos0000.mrc
-│   │   ├── eigen_pos0001.mrc
-│   │   ├── ...
-│   │   ├── focus_mask.mrc
-│   │   ├── mask.mrc
-│   │   ├── mean.mrc
-│   │   ├── mean_filt.mrc
-│   │   ├── mean_half1_unfil.mrc
-│   │   ├── mean_half2_unfil.mrc
-│   │   ├── variance4.mrc
-│   │   ├── variance10.mrc
-│   │   └── variance20.mrc
-│   └── analysis_4_noreg
-│       ├── kmeans_center_coords.txt
-│       ├── kmeans_center_volumes
-│       │   ├── all_volumes
-│       │   │   ├── locres0000.mrc
-│       │   │   ├── locres0001.mrc
-│       │   │   ├── ...
-│       │   │   ├── vol0000.mrc
-│       │   │   ├── vol0001.mrc
-│       │   │   └── ...
-│       │   ├── latent_coords.txt
-│       │   ├── vol0000
-│       │   │   ├── half1_unfil.mrc
-│       │   │   ├── half2_unfil.mrc
-│       │   │   ├── locres.mrc
-│       │   │   ├── locres_filtered.mrc
-│       │   │   ├── locres_filtered_nob.mrc
-│       │   │   ├── params.pkl
-│       │   │   ├── split_choice.pkl
-│       │   │   ├── unfil.mrc
-│       │   │   ├── volume_sampling.mrc
-│       │   │   └── heterogeneity_distances.txt
-│       │   └── ...
-│       ├── kmeans_result.pkl
-│       ├── mean_variance_eigenvolume_plots.png
-│       ├── PCA
-│       │   ├── PC_01.png
-│       │   ├── PC_01no_annotate.png
-│       │   ├── PC_02.png
-│       │   ├── PC_02no_annotate.png
-│       │   ├── ...
-│       ├── run.log
-│       ├── trajectory_endpoints.pkl
-│       └── umap
-│           ├── kmeans_centers.png
-│           ├── kmeans_centers_no_annotate.png
-│           ├── sns.png
-│           ├── sns_hex.png
-│           └── umap_embedding.pkl
-├── density
+├── analysis_2_noreg                   # Generated by `analyze.py` with zdim=2
+│   ├── contrast_histogram.png         # Histogram of contrast values
+│   ├── density_plots                  # Density plots from `estimate_conformational_density.py`
+│   │   └── density_01.png
+│   ├── density_plots_sliced           # Sliced density plots
+│   │   └── density_01.png
+│   ├── kmeans_center_coords.txt       # Coordinates of k-means cluster centers in latent space
+│   ├── kmeans_center_volumes          # Volumes corresponding to k-means cluster centers
+│   │   ├── all_volumes
+│   │   │   ├── locres0000.mrc
+│   │   │   ├── locres0001.mrc
+│   │   │   ├── locres0002.mrc
+│   │   │   ├── vol0000.mrc
+│   │   │   ├── vol0001.mrc
+│   │   │   └── vol0002.mrc
+│   │   ├── latent_coords.txt          # Latent coordinates of volumes
+│   │   ├── vol0000                    # Subdirectories for each cluster center volume
+│   │   │   ├── half1_unfil.mrc
+│   │   │   ├── half2_unfil.mrc
+│   │   │   ├── heterogeneity_distances.txt
+│   │   │   ├── locres_filtered.mrc
+│   │   │   ├── locres_filtered_nob.mrc
+│   │   │   ├── locres.mrc
+│   │   │   ├── params.pkl
+│   │   │   ├── split_choice.pkl
+│   │   │   ├── unfil.mrc
+│   │   │   └── volume_sampling.mrc
+│   │   ├── vol0001
+│   │   │   └── [same structure as vol0000]
+│   │   └── vol0002
+│   │       └── [same structure as vol0000]
+│   ├── kmeans_result.pkl              # Results of k-means clustering
+│   ├── PCA                            # Principal Component Analysis results
+│   │   ├── PC_01.png
+│   │   └── PC_01no_annotate.png
+│   ├── run.log                        # Log file from `analyze.py`
+│   ├── traj0                          # Trajectory directory generated by `compute_trajectory.py`
+│   │   ├── all_volumes
+│   │   │   ├── locres0000.mrc
+│   │   │   ├── locres0001.mrc
+│   │   │   ├── locres0002.mrc
+│   │   │   ├── locres0003.mrc
+│   │   │   ├── locres0004.mrc
+│   │   │   ├── locres0005.mrc
+│   │   │   ├── vol0000.mrc
+│   │   │   ├── vol0001.mrc
+│   │   │   ├── vol0002.mrc
+│   │   │   ├── vol0003.mrc
+│   │   │   ├── vol0004.mrc
+│   │   │   └── vol0005.mrc
+│   │   ├── density
+│   │   │   └── density_01.png
+│   │   ├── latent_coords.txt
+│   │   ├── path.json                  # Trajectory path in latent space
+│   │   ├── vol0000
+│   │   │   └── [volume files as in kmeans_center_volumes]
+│   │   ├── vol0001
+│   │   │   └── [volume files as in kmeans_center_volumes]
+│   │   ├── vol0002
+│   │   │   └── [volume files as in kmeans_center_volumes]
+│   │   ├── vol0003
+│   │   │   └── [volume files as in kmeans_center_volumes]
+│   │   ├── vol0004
+│   │   │   └── [volume files as in kmeans_center_volumes]
+│   │   └── vol0005
+│   │       └── [volume files as in kmeans_center_volumes]
+│   ├── trajectory_endpoints.pkl       # Endpoints used for trajectory computation
+│   └── umap                           # UMAP embedding results
+│       ├── kmeans_centers.png
+│       ├── kmeans_centers_no_annotate.png
+│       ├── sns.png
+│       ├── sns_hex.png
+│       └── umap_embedding.pkl
+├── command.txt                        # Command used to run the pipeline
+├── density                            # Generated by `estimate_conformational_density.py`
 │   ├── all_densities
 │   │   ├── deconv_density_0.pkl
 │   │   ├── deconv_density_1.pkl
-│   │   ├── ...
-│   ├── all_densities.png
-│   ├── deconv_density_knee.pkl
-│   ├── knee_locator.png
-│   └── Lcurve.png
-├── trajectory
-│   ├── density
-│   ├── density_01.png
-│   ├── density_02.png
-│   ├── ...
-│   ├── path.json
-│   ├── vol0000
-│   │   ├── half1_unfil.mrc
-│   │   ├── half2_unfil.mrc
-│   │   ├── locres.mrc
-│   │   ├── locres_filtered.mrc
-│   │   ├── locres_filtered_nob.mrc
-│   │   ├── params.pkl
-│   │   ├── split_choice.pkl
-│   │   ├── unfil.mrc
-│   │   ├── volume_sampling.mrc
-│   │   └── heterogeneity_distances.txt
-│   └── vol0001
-│       └── ...
-└── run.log
+│   │   ├── deconv_density_2.pkl
+│   │   ├── deconv_density_3.pkl
+│   │   ├── deconv_density_4.pkl
+│   │   ├── deconv_density_5.pkl
+│   │   ├── deconv_density_6.pkl
+│   │   ├── deconv_density_7.pkl
+│   │   ├── deconv_density_8.pkl
+│   │   ├── deconv_density_9.pkl
+│   │   └── deconv_density_10.pkl
+│   ├── all_densities.png              # Visualization of densities across alphas
+│   ├── deconv_density_knee.pkl        # Optimal density selected via L-curve
+│   └── Lcurve.png                     # L-curve plot for regularization selection
+├── model                              # Generated by `pipeline.py`
+│   ├── covariance_cols.pkl            # Covariance matrices
+│   ├── embeddings.pkl                 # Embeddings of the data
+│   ├── halfsets.pkl                   # Information about half-sets
+│   ├── params.pkl                     # Parameters used during pipeline execution
+│   └── particles_halfsets.pkl         # Indices of particles in each half-set
+├── output
+│   ├── plots                          # Plots generated during the pipeline
+│   │   ├── contrast_histogram.png     # Histogram of contrast values
+│   │   ├── eigenvalues.png            # Eigenvalues plot
+│   │   ├── mean_fsc.png               # Fourier Shell Correlation of the mean volume
+│   │   └── mean_variance_eigenvolume_plots.png
+│   └── volumes                        # Volumes generated by `pipeline.py`
+│       ├── dilated_mask.mrc           # Dilated version of the mask
+│       ├── eigen_neg*.mrc             # Negative eigenvolumes (principal components)
+│       ├── eigen_pos*.mrc             # Positive eigenvolumes (principal components)
+│       ├── focus_mask.mrc             # Focus mask if provided
+│       ├── mask.mrc                   # Solvent mask used
+│       ├── mean.mrc                   # Mean volume
+│       ├── mean_filt.mrc              # Filtered mean volume
+│       ├── mean_half1_unfil.mrc       # Unfiltered mean volume from half-set 1
+│       ├── mean_half2_unfil.mrc       # Unfiltered mean volume from half-set 2
+│       ├── variance4.mrc              # Variance map for zdim=4
+│       ├── variance10.mrc             # Variance map for zdim=10
+│       └── variance20.mrc             # Variance map for zdim=20
+├── run.log                            # Log file from the pipeline execution
+└── trajectory1                        # Generated by `compute_trajectory.py`
+    ├── density
+    │   └── density_01.png
+    ├── path.json                      # Trajectory path in latent space
+    └── vol0000
+        └── [volume files as in kmeans_center_volumes]
 ```
 
 </details>
 
 #### Directory and File Descriptions
 
+- **`analysis_2_noreg/`**: Results from `analyze.py` with `zdim=2` and no regularization.
+  - **`contrast_histogram.png`**: Histogram of estimated contrast values across images.
+  - **`density_plots/`**: Density plots generated from conformational density estimation.
+  - **`kmeans_center_coords.txt`**: Coordinates of k-means cluster centers in latent space.
+  - **`kmeans_center_volumes/`**: Contains volumes corresponding to k-means cluster centers.
+    - **`all_volumes/`**: Aggregated volumes for all centers.
+      - `vol****.mrc`: Volumes for each cluster center.
+      - `locres****.mrc`: Locally filtered volumes.
+    - **`latent_coords.txt`**: Latent space coordinates of the volumes.
+    - **`vol****/`**: Subdirectories for each cluster center containing detailed volume files.
+  - **`kmeans_result.pkl`**: Results of the k-means clustering, including labels and centers.
+  - **`PCA/`**: Principal Component Analysis plots.
+    - `PC_01.png`: Plot of the first principal component.
+    - `PC_01no_annotate.png`: Same plot without annotations.
+  - **`traj0/`**: Trajectory results from `compute_trajectory.py`.
+    - **`all_volumes/`**: Volumes along the trajectory.
+    - **`density/`**: Density plots along the trajectory.
+    - **`path.json`**: JSON file containing the trajectory path.
+    - **`vol****/`**: Volumes at specific points along the trajectory.
+  - **`trajectory_endpoints.pkl`**: Endpoints used for trajectory computations.
+  - **`umap/`**: UMAP embedding results.
+    - `sns.png`, `sns_hex.png`: Scatter plots of the embeddings.
+    - `kmeans_centers.png`: UMAP plot showing k-means centers.
+    - `umap_embedding.pkl`: UMAP embedding coordinates.
+
 - **`command.txt`**: Contains the command used to run the pipeline, useful for record-keeping and reproducing results.
+
+- **`density/`**: Generated by `estimate_conformational_density.py`.
+  - **`all_densities/`**: Deconvolved densities for different regularization parameters (`alphas`).
+    - `deconv_density_*.pkl`: Density files for each alpha value.
+  - **`all_densities.png`**: Visualization of all densities across different alphas.
+  - **`deconv_density_knee.pkl`**: Deconvolved density corresponding to the optimal regularization parameter (knee point).
+  - **`Lcurve.png`**: L-curve plot used for selecting the optimal alpha.
 
 - **`model/`**: Generated by `pipeline.py`.
   - `covariance_cols.pkl`: Covariance matrices of the columns.
@@ -734,7 +925,12 @@ Below is the updated directory tree structure (click to expand):
   - `particles_halfsets.pkl`: Indices of particles in each half-set.
 
 - **`output/`**: Main output directory containing results and volumes.
-  - **`volumes/`**: Generated by `pipeline.py`.
+  - **`plots/`**: Various plots generated during the pipeline.
+    - `contrast_histogram.png`: Histogram of estimated contrast values.
+    - `eigenvalues.png`: Plot showing the decay of eigenvalues.
+    - `mean_fsc.png`: Fourier Shell Correlation of the mean volume.
+    - `mean_variance_eigenvolume_plots.png`: Combined plots of mean, variance, and eigenvolumes.
+  - **`volumes/`**: Volumes generated by `pipeline.py`.
     - `mean.mrc`: The mean volume reconstructed from the data.
     - `mean_filt.mrc`: Filtered mean volume.
     - `mean_half1_unfil.mrc` & `mean_half2_unfil.mrc`: Unfiltered mean volumes from half-sets.
@@ -744,62 +940,37 @@ Below is the updated directory tree structure (click to expand):
     - `focus_mask.mrc`: The focus mask if provided.
     - `dilated_mask.mrc`: Dilated version of the mask.
 
-  - **`analysis_[zdim]_noreg/`**: Generated by `analyze.py` for each specified latent dimension `zdim`.
-    - **`kmeans_center_coords.txt`**: Coordinates of the k-means cluster centers in latent space.
-    - **`kmeans_center_volumes/`**: Contains volumes corresponding to k-means cluster centers.
-      - `all_volumes/`: Aggregated volumes for all centers.
-        - `vol*.mrc` & `locres*.mrc`: Volumes and locally filtered volumes for each cluster center.
-      - `vol****/`: Subdirectories for each cluster center.
-        - `unfil.mrc`: Unfiltered volume.
-        - `locres.mrc`: Locally filtered volume.
-        - `locres_filtered.mrc`: Filtered local resolution volume.
-        - `params.pkl`, `split_choice.pkl`: Additional parameters and choices used.
-        - `heterogeneity_distances.txt`: Distances related to heterogeneity measures.
-    - **`kmeans_result.pkl`**: Results of the k-means clustering, including labels and centers.
-    - **`mean_variance_eigenvolume_plots.png`**: Combined plots of mean, variance, and eigenvolumes.
-    - **`PCA/`**: Contains PCA plots and embeddings.
-      - `PC_*.png`: Plots of principal components.
-      - `PC_*no_annotate.png`: PCA plots without annotations.
-    - **`umap/`**: Contains UMAP embeddings and plots.
-      - `umap_embedding.pkl`: UMAP embedding coordinates.
-      - `sns.png`, `sns_hex.png`: Scatter plots of the embeddings.
-      - `kmeans_centers.png`: Plot showing k-means centers on the UMAP embedding.
-      - `kmeans_centers_no_annotate.png`: UMAP plots without annotations.
-    - **`trajectory_endpoints.pkl`**: Endpoints used for trajectory computations.
-    - **`run.log`**: Log file containing messages and errors during the analysis.
-
-- **`density/`**: Generated by `estimate_conformational_density.py`.
-  - `deconv_density_knee.pkl`: Deconvolved density corresponding to the optimal regularization parameter (knee point).
-  - `all_densities/`: Contains deconvolved densities for different regularization parameters (`alphas`).
-    - `deconv_density_*.pkl`: Density files for each alpha value.
-  - `all_densities.png`: Visualization of all densities across different alphas.
-  - `Lcurve.png`: L-curve plot used for selecting the optimal alpha.
-  - `knee_locator.png`: Plot showing the knee point in the L-curve.
-
-- **`trajectory/`**: Generated by `compute_trajectory.py`.
-  - `path.json`: JSON file containing the trajectory path in latent space.
-  - `density/`: Contains density plots along the trajectory.
-    - `density_*.png`: Density plots for different pairs of dimensions.
-  - `vol****/`: Volumes along the computed trajectory.
-    - Similar structure to volumes in `kmeans_center_volumes/`.
-
 - **`run.log`**: Log file containing messages and errors during the pipeline execution.
+
+- **`trajectory1/`**: Generated by `compute_trajectory.py`.
+  - **`density/`**: Density plots along the trajectory.
+    - `density_01.png`: Density plot for the first pair of dimensions.
+  - **`path.json`**: JSON file containing the trajectory path in latent space.
+  - **`vol0000/`**: Volume at the starting point of the trajectory.
+    - [Contains volume files as in `kmeans_center_volumes/vol****/`]
 
 #### Functions and Their Outputs
 
-- **`pipeline.py`**: Generates the `model/` directory and the `output/volumes/` directory. It computes the mean volume, variance maps, eigenvolumes, and saves necessary parameters and embeddings.
+- **`pipeline.py`**: Generates the `model/` directory and the `output/` directory.
+  - Computes the mean volume, variance maps, eigenvolumes, and saves necessary parameters and embeddings.
+  - Generates plots such as eigenvalues and FSC curves.
 
-- **`analyze.py`**: Creates the `output/analysis_[zdim]_noreg/` directories, performing k-means clustering, generating cluster center volumes, and computing UMAP and PCA embeddings.
+- **`analyze.py`**: Creates the `analysis_[zdim]_noreg/` directories.
+  - Performs k-means clustering, generating cluster center volumes, and computing UMAP and PCA embeddings.
+  - Generates contrast histograms and density plots.
 
-- **`compute_state.py`**: Generates volumes at specific points in latent space provided by the user. The outputs are typically stored in directories like `vol****/` under a specified output directory.
+- **`compute_state.py`**: Generates volumes at specific points in latent space provided by the user.
+  - Outputs are stored in directories like `vol****/` under `kmeans_center_volumes/` or specified output directory.
 
-- **`compute_trajectory.py`**: Produces the `trajectory/` directory, containing volumes along a trajectory in latent space, density plots, and the trajectory path (`path.json`).
+- **`compute_trajectory.py`**: Produces the `traj0/` directory within `analysis_[zdim]_noreg/` or a separate trajectory directory.
+  - Contains volumes along a trajectory in latent space, density plots, and the trajectory path (`path.json`).
 
-- **`estimate_conformational_density.py`**: Creates the `density/` directory with deconvolved density estimations, plots, and related data. It computes the conformational density in the principal component space and selects the optimal regularization parameter using the L-curve method.
+- **`estimate_conformational_density.py`**: Creates the `density/` directory with deconvolved density estimations, plots, and related data.
+  - Computes the conformational density in the principal component space and selects the optimal regularization parameter using the L-curve method.
 
 #### Copying and Visualizing Results
 
-For visualization purposes, especially when working remotely, it's recommended to copy only the necessary output directories (e.g., `output/volumes/`, `output/analysis_[zdim]_noreg/`, `trajectory/`, `density/`) to your local machine. This allows you to use visualization tools without transferring large model files.
+For visualization purposes, especially when working remotely, it's recommended to copy only the necessary output directories (e.g., `output/`, `analysis_[zdim]_noreg/`, `trajectory1/`, `density/`) to your local machine. This allows you to use visualization tools without transferring large model files.
 
 You can then use software like ChimeraX to open and visualize the `.mrc` volume files found in these directories.
 
