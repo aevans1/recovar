@@ -82,6 +82,11 @@ def estimate_conformational_density(recovar_result_dir, output_dir = None, pca_d
 
 
     output.mkdir_safe(output_dir + '/all_densities/' )
+    
+    # Save the raw density 
+    utils.pickle_dump({ 'density' : density, 'latent_space_bounds' : bounds}, output_dir + '/all_densities/' + 'raw_density.pkl')
+    
+    # Save the deconvolved densities 
     for idx in range(len(lbfgsb_sols)):
         utils.pickle_dump({ 'density' : lbfgsb_sols[idx], 'latent_space_bounds' : bounds, 'alpha' : alphas[idx] }, output_dir + '/all_densities/' + f'deconv_density_{idx}.pkl')
 
