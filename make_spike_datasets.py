@@ -31,8 +31,6 @@ def main():
     n_images = args.n_images
     output_folder = args.output_folder
     pdb_folder = args.pdb_folder
-    output_folder = args.output_folder
-    pdb_folder = args.pdb_folder
 
     # Some parameters to set
     grid_size = 256
@@ -62,8 +60,6 @@ def main():
 
     disc_type_sim = 'nufft'
     disc_type_infer = 'cubic'
-    # disc_type_sim = 'linear_interp'
-    # disc_type_infer = 'linear_interp'
 
     volume_folder = output_folder + '/' + 'true_volumes/'
     output.mkdir_safe(volume_folder)
@@ -82,11 +78,6 @@ def main():
             noise_model = "white", put_extra_particles = False, percent_outliers = 0.00, 
             volume_radius = 0.7, trailing_zero_format_in_vol_name = True, noise_scale_std = 0, contrast_std = 0, disc_type = disc_type_sim)
         
-        # Load datasets and volumes
-        # Volumes are scaled so that images are normalized. So they have a slightly different scale for each dataset.
-        volumes = simulator.load_volumes_from_folder(sim_info['volumes_path_root'], sim_info['grid_size'] , sim_info['trailing_zero_format_in_vol_name'], normalize=False )
-        gt_volumes = volumes * sim_info['scale_vol']
-
         dataset_options = dataset.get_default_dataset_option()
         dataset_options['particles_file'] = dataset_folder + '/' + f'particles.{grid_size}.mrcs'
         dataset_options['ctf_file'] = dataset_folder + '/' + f'ctf.pkl'
