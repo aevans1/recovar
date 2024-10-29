@@ -544,7 +544,7 @@ roll_batch = jax.vmap(lambda x,y,z: jax.numpy.roll(x,y,axis = z), in_axes = (0, 
 
 
 # Solves the linear system Dx = b.
-def simulate_data(experiment_dataset, volumes,  noise_variance,  batch_size, image_assignments, per_image_contrast, per_image_noise_scale, seed =0, disc_type = 'linear_interp', mrc_file = None, pad_before_translate = False, Bfactor=100 ):
+def simulate_data(experiment_dataset, volumes,  noise_variance,  batch_size, image_assignments, per_image_contrast, per_image_noise_scale, seed =0, disc_type = 'linear_interp', mrc_file = None, pad_before_translate = False, Bfactor=100):
 
     if disc_type == "pdb":
         gt_vols = [gsm.generate_volume_from_atoms(vol, voxel_size = experiment_dataset.voxel_size,  grid_size = experiment_dataset.grid_size,  freq_coords = None, jax_backend = False).reshape(-1) for vol in volumes ]
@@ -564,7 +564,14 @@ def simulate_data(experiment_dataset, volumes,  noise_variance,  batch_size, ima
         output_array = mrc_file.data
 
     n_images_done =0 
+    sq_norm_images_avg = 0
+    sq_norm_noise_avg = 0
+    snr_avg = 0
     for vol_idx in range(len(volumes)):
+        sq_norm_images_avg_vol = 0
+        sq_norm_noise_avg_vol = 0
+        snr_avg_vol = 0
+        
         img_indices = np.nonzero(image_assignments == vol_idx)[0]
         n_images = img_indices.size
         
@@ -576,7 +583,8 @@ def simulate_data(experiment_dataset, volumes,  noise_variance,  batch_size, ima
         else:
             volume = volumes[vol_idx]
 
-        for k in range(0, int(np.ceil(n_images/batch_size))):
+        n_batches = int(np.ceil(n_images/batch_size))
+        for k in range(0, n_batches):
             batch_st = int(k * batch_size)
             batch_end = int(np.min( [(k+1) * batch_size, n_images]))
             indices = img_indices[batch_st:batch_end]
@@ -676,21 +684,47 @@ def simulate_data(experiment_dataset, volumes,  noise_variance,  batch_size, ima
             noise_batch = make_noise_batch(subkey, noise_image, images_batch.shape)
             noise_batch *= per_image_noise_scale[indices][...,None,None]
             images_batch *= per_image_contrast[indices][...,None,None]
+            sq_norm_images_batch = np.mean(images_batch**2)
+            sq_norm_noise_batch = np.mean(noise_batch**2)
+            snr_batch = sq_norm_images_batch / sq_norm_noise_batch
+            
+            sq_norm_images_avg_vol += sq_norm_images_batch
+            sq_norm_noise_avg_vol += sq_norm_noise_batch
+            snr_avg_vol += snr_batch
+            
+            #if k % 10 == 0:
+            #    logger.info(f"SNR for batch is:{snr_batch:0.5f}")
+            #    logger.info(f"sq norm images for batch is:{sq_norm_images_batch:0.5f}")
+            #    logger.info(f"sq norm noise for nobatch is:{sq_norm_noise_batch:0.5f}")
             output_array[indices] = np.array(images_batch + noise_batch)
-
-
             n_images_done += indices.size
             # if n_images_done % 1000 == 0:
             logger.info(f"Batch {k}: Generated {n_images_done} images so far")
-
             # import pdb; pdb.set_trace()
+
+        if n_batches > 0: 
+            snr_avg_vol /= n_batches 
+            sq_norm_images_avg_vol /= n_batches
+            sq_norm_noise_avg_vol /= n_batches
+
+        snr_avg += snr_avg_vol
+        sq_norm_images_avg += sq_norm_images_avg_vol
+        sq_norm_noise_avg += sq_norm_noise_avg_vol
+
+    snr_avg /= len(volumes)
+    sq_norm_images_avg /= len(volumes)
+    sq_norm_noise_avg /= len(volumes)
+    logger.info(f"Average SNR: {snr_avg}")
+    logger.info(f"Average sq norm of images: {sq_norm_images_avg:0.8f}")
+    logger.info(f"Average sq norm of noise: {sq_norm_noise_avg:0.8f}")
+   
     logger.info("Discretizing with: " + disc_type)
     logger.info("Done generating data")
 
     if mrc_file is not None:
         return mrc_file
     else:
-        return output_array 
+        return output_array
 
 
 def make_noise_batch(subkey, noise_image, images_batch_shape):
