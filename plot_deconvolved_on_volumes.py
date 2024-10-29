@@ -8,37 +8,12 @@ from scipy.stats import vonmises
 import pickle
 
 ## NOTE: the dataset folder has to matched up correctly with the recovar result directory!
-recovar_result_dir = '/mnt/home/levans/Projects/Model_bias_heterogeneity/Igg/output_simulated_high_snr'
-dataset_folder = '/mnt/home/levans/ceph/igg_lukes/dataset0'
+recovar_result_dir = '/mnt/home/levans/Projects/Model_bias_heterogeneity/Igg/output_simulated_mid_snr'
+dataset_folder = '/mnt/home/levans/ceph/igg_lukes/dataset4'
 
 ## Pick dimension of whatever deconvolved embedding we are looking at
-zdim = 4
+zdim = 2
 density_dir = recovar_result_dir + "/" + f'density_{zdim}'
-
-volumes_path_root = '/mnt/home/levans/ceph/igg_lukes/simulated_test_volumes'
-pipeline_output = output.PipelineOutput(recovar_result_dir)
-
-## load volumes
-def make_file(k):
-    return volumes_path_root + "/" + format(k, '04d')+".mrc"
-idx =0 
-files = []
-while(os.path.isfile(make_file(idx))):
-    files.append(make_file(idx))
-    idx+=1
-volumes, _ = simulator.generate_volumes_from_mrcs(files, None, padding= 0 )
-
-## For simulated data: volumes need to be rescaled according to recovars simulator
-file = open(dataset_folder + '/' + 'sim_info.pkl', 'rb')
-scale_vol = pickle.load(file)['scale_vol']
-volumes *= scale_vol
-
-## Old volume scaling here
-#print(f"mean of mean vol pixels: {np.mean(mean)}")
-#print(f"mean of gt vol pixels: {np.mean(volumes)}")
-#print(np.mean(mean).real / np.mean(volumes))
-#scale = np.mean(mean) / np.mean(volumes)
-#volumes *= scale**(0.5)
 
 ## Gets embedding from ground truth volumes
 # For now: making a custom projection that doesn't load in the whole PC matrix U, full matrix is too large
@@ -47,6 +22,31 @@ zs_gt_fname = density_dir + "/" + f"embedded_gt_volumes_zdim{zdim}.npy"
 if os.path.isfile(zs_gt_fname):
     zs_gt = np.load(zs_gt_fname)
 else:
+    volumes_path_root = '/mnt/home/levans/ceph/igg_lukes/simulated_test_volumes'
+    pipeline_output = output.PipelineOutput(recovar_result_dir)
+   
+    ## load volumes
+    def make_file(k):
+        return volumes_path_root + "/" + format(k, '04d')+".mrc"
+    idx =0 
+    files = []
+    while(os.path.isfile(make_file(idx))):
+        files.append(make_file(idx))
+        idx+=1
+    volumes, _ = simulator.generate_volumes_from_mrcs(files, None, padding= 0 )
+    
+    ## For simulated data: volumes need to be rescaled according to recovars simulator
+    file = open(dataset_folder + '/' + 'sim_info.pkl', 'rb')
+    scale_vol = pickle.load(file)['scale_vol']
+    volumes *= scale_vol
+    
+    ## Old volume scaling here
+    #print(f"mean of mean vol pixels: {np.mean(mean)}")
+    #print(f"mean of gt vol pixels: {np.mean(volumes)}")
+    #print(np.mean(mean).real / np.mean(volumes))
+    #scale = np.mean(mean) / np.mean(volumes)
+    #volumes *= scale**(0.5)
+    
     zs_gt = (np.conj(pipeline_output.get('u'))[:zdim, :] @ (volumes - pipeline_output.get('mean')).T).T.real
     np.save(density_dir + "/" + f"embedded_gt_volumes_zdim{zdim}.npy", zs_gt)
 
@@ -58,14 +58,16 @@ figure_dir = density_dir + '/' + 'figures'
 if not os.path.exists(figure_dir):
     os.makedirs(figure_dir)
 
-## Visually check that first 2 pc embeddings of volumes line up with some embedded kmeans clusters
-plt.figure()
-plt.scatter(zs[:, 0], zs[:, 1], s= 2, label="kmeans cluster centers")
-plt.scatter(zs_gt[:, 0], zs_gt[:, 1], s = 2, label="embedded volumes")
-plt.xlabel("PC1")
-plt.ylabel("PC2")
-plt.legend()
-plt.savefig(figure_dir + '/' + "latent_vols_kmeans_plot.png", dpi=300)
+## Visually check that pc embeddings of volumes line up with some embedded kmeans clusters
+for i in range(zdim):
+    for j in range(i+1,zdim):
+        plt.figure()
+        plt.scatter(zs[:, i], zs[:, j], s= 2, label="kmeans cluster centers")
+        plt.scatter(zs_gt[:, i], zs_gt[:, j], s = 2, label="embedded volumes")
+        plt.xlabel(f"PC{i}")
+        plt.ylabel(f"PC{j}")
+        plt.legend()
+        plt.savefig(figure_dir + '/' + f"latent_vols_kmeans_plot_PC{i}{j}.png", dpi=300)
 
 ### define density that volumes were resampled from
 def p(x):
@@ -80,7 +82,6 @@ def p(x):
 x = np.linspace(0, 2*np.pi, 100)
 y = p(x)
 y /= (np.sum(y))
-
 
 # Plot ground truth density against raw density
 density_file = utils.pickle_load(density_dir + "/" + f'all_densities/raw_density.pkl')
@@ -117,8 +118,10 @@ for k in range(11):
     plt.xlabel(r"Dihedral Angle($\degree$)", fontsize=16)
     plt.ylabel("Probability", fontsize=16)
     plt.legend()
-    plt.savefig(figure_dir + "/" + f"deconv_density_at_gt_vols_{k}_new.png", dpi=300)
+    plt.savefig(figure_dir + "/" + f"deconv_density_at_gt_vols_{k}.png", dpi=300)
 
+
+# replot for d
 
 
 ##### old code for loading in paths instead of ground truth volumes above

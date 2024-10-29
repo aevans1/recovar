@@ -70,10 +70,10 @@ def main():
     volume_shape = tuple(3*[grid_size])
     disc_type_sim = 'nufft'
 
-    # Load pdbs
+    ## Load pdbs
     pdb_atoms = load_pdbs_from_dir(pdb_folder)
 
-    # Shift atoms
+    ## Shift atoms
     atoms = pdb_atoms[0]
     coords = atoms.getCoords()
     offset = ssp.get_center_coord_offset(coords)
@@ -105,21 +105,10 @@ def main():
     volume_distribution = p(x)
     volume_distribution /= (np.sum(volume_distribution))
 
-    # First, simulate clean images, check norm of images
-    noise_level = 
-    dataset_folder = output_folder + '/' + f'dataset_clean/'
-    image_stack, sim_info = simulator.generate_synthetic_dataset(dataset_folder, voxel_size, volume_folder, n_images,
-        outlier_file_input = None, grid_size = grid_size,
-        volume_distribution = volume_distribution,  dataset_params_option = "uniform", noise_level = noise_level,
-        noise_model = "white", put_extra_particles = False, percent_outliers = 0.00, 
-        volume_radius = 0.7, trailing_zero_format_in_vol_name = True, noise_scale_std = 0, contrast_std = 0, disc_type = disc_type_sim)
-    print(image_stack.shape) 
-
     # Simulate images
     for idx, noise_level in enumerate(noise_levels):
 
-        print(f"Starting at noise level {idx} of {len(noise_levels)}") 
-        
+        print(f"Starting at noise level {idx} of {len(noise_levels)}, noise_level:{noise_level}") 
         # Generate dataset
         noise_level = noise_level
         dataset_folder = output_folder + '/' + f'dataset{idx}/'
@@ -137,7 +126,7 @@ def main():
         # Dump results to file
         recovar.utils.pickle_dump( sim_info, dataset_folder + '/' + 'sim_info.pkl')
 
-    # Save info relevant to all datasets
+    ## Save info relevant to all datasets
     recovar.utils.pickle_dump( noise_levels, output_folder + '/' + 'noise_levels.pkl')
 
 if __name__ == '__main__':
