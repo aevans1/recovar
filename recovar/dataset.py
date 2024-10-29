@@ -547,8 +547,14 @@ def load_cryodrgn_dataset(particles_file, poses_file, ctf_file, datadir = None, 
     translations = np.array(posetracker.trans).astype(np.float32)
     rots = np.array(posetracker.rots).astype(np.float32)
 
+    # NOTE: there is a datatype error here when using get_default_dataset options due to casting nonetype ind as int here 
+    if ind is not None:
+        ind_return = ind.astype(int)
+    else:
+        ind_return = ind 
+
     return CryoEMDataset( dataset, voxel_size,
-                              rots, translations, ctf_params[:,1:], CTF_fun = CTF_fun, dataset_indices = ind.astype(int), tilt_series_flag = tilt_series)
+                              rots, translations, ctf_params[:,1:], CTF_fun = CTF_fun, dataset_indices = ind_return, tilt_series_flag = tilt_series)
 
 
 
