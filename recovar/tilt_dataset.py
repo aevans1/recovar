@@ -146,7 +146,7 @@ class ImageDataset(data.Dataset):
         self, start: int, stop: int
     ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         return (
-            self.src.images(slice(start, stop), require_contiguous=True).numpy(),
+            self.src.images(slice(start, stop), require_contiguous=True),
             None,
         )
 
