@@ -75,14 +75,17 @@ def compute_image_assignment(experiment_dataset, volumes,  noise_variance, batch
 
 
 # @functools.partial(jax.jit, static_argnums = [5])    
-def estimate_false_positive_rate(experiment_dataset, volumes,  noise_variance, batch_size, disc_type = 'cubic'):
+def estimate_false_positive_rate(experiment_dataset, volumes,  noise_variance, batch_size, disc_type = 'cubic', subset_indices = None):
 
     if disc_type == 'cubic':
         from recovar import covariance_estimation
         volumes = covariance_estimation.compute_spline_coeffs_in_batch(volumes, experiment_dataset.volume_shape, gpu_memory= None)
 
     volumes = jnp.array(volumes).astype(experiment_dataset.dtype)
-    data_generator = experiment_dataset.get_dataset_generator(batch_size=batch_size) 
+    if subset_indices is not None:
+        data_generator = experiment_dataset.get_dataset_subset_generator(batch_size=batch_size, subset_indices=subset_indices) 
+    else:
+        data_generator = experiment_dataset.get_dataset_generator(batch_size=batch_size) 
     alphas = np.zeros(( experiment_dataset.n_units), dtype = experiment_dataset.dtype_real)
     assert volumes.shape[0] ==2, 'Only two volumes are supported'
     difference = volumes[0] - volumes[1]
