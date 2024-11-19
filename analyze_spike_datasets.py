@@ -68,7 +68,7 @@ def classify_with_prior(pop, log_likelihoods, true_assignments):
 
 
 def main():
-    
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--output_folder", default="/mnt/home/levans/ceph/spike/recovar_experiments_100k", type=str)
 
@@ -79,6 +79,9 @@ def main():
     file = open(output_folder + '/' + 'noise_levels.pkl','rb')
     noise_levels = pickle.load(file)
     file.close()  
+
+    print("noiselevellsss!!")
+    print(noise_levels)
 
     file = open(output_folder + '/' + 'pops_errors.pkl','rb')
     pops_errors = pickle.load(file)
@@ -142,7 +145,6 @@ def main():
         plt.semilogx(noise_levels[:idx+1], deconvolve_observed[:idx+1], label='Deconvolve', color='green', marker='s', markersize=6, linewidth=2)
         plt.semilogx(noise_levels[:idx+1], reweight_observed[:idx+1], label='Reweight', color='purple', marker='s', markersize=6, linewidth=2)
         plt.semilogx(noise_levels[:idx+1], bayes_observed[:idx+1], label='Bayes Optimal', color='orange', marker='s', markersize=6, linewidth=2)
-
 
         plt.xlabel('Noise Level', fontsize=14)
         plt.ylabel('Misclassification Rate', fontsize=14)

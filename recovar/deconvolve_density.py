@@ -16,6 +16,16 @@ def get_raw_density(pipeline_output, zdim = 10, pca_dim_max = 5, percentile_reje
     zdim = pca_dim_max
     zs = zs[good_zs][:,:zdim]
     cov_zs = cov_zs[good_zs][:,:zdim,:zdim]
+
+    # trying different bandwidth
+    #n,d = zs.shape 
+    #weights = jnp.full(n, 1.0 / n)
+    #neff = 1 / jnp.sum(weights**2)
+    #factor = jnp.power(neff * (d + 2) / 4.0, -1. / (d + 4))
+    #new_factor = factor/4.
+    #print(f"silverman: {factor}")
+    #print(f"new bandwidth:{new_factor}")
+    #gauss_kde = jax.scipy.stats.gaussian_kde(zs.T, new_factor.item())
     gauss_kde = jax.scipy.stats.gaussian_kde(zs.T, 'silverman')
     covar_data = np.mean(jnp.linalg.inv(cov_zs), axis=0)
     total_covar = covar_data + gauss_kde.covariance
