@@ -14,7 +14,7 @@ from recovar import utils
 from recovar import dataset
 from recovar import regularization
 import matplotlib.patheffects as pe
-
+from scipy.ndimage import map_coordinates
 import time
 
 def get_resampled_distances(gt_vols):
@@ -730,7 +730,9 @@ def density_on_grid(points, density, bounds):
     import jax.scipy
     _, z_to_grid = ld.get_grid_z_mappings(bounds, num_points = density.shape[0])
     path_grid = z_to_grid(points)
-    return jax.scipy.ndimage.map_coordinates(density, path_grid.T, order=1)
+    #return jax.scipy.ndimage.map_coordinates(density, path_grid.T, order=1)
+    # Luke: trying scipy map coords as it allows higher order interpolation
+    return map_coordinates(density, path_grid.T, order=3)
 
 
 def vol_to_z(gt_volumes, u, mean, basis_size):
