@@ -71,45 +71,45 @@ def main():
     disc_type_sim = 'nufft'
 
     ## Load pdbs
-    #pdb_atoms = load_pdbs_from_dir(pdb_folder)
+    pdb_atoms = load_pdbs_from_dir(pdb_folder)
 
     ## Shift atoms
-    #atoms = pdb_atoms[0]
-    #coords = atoms.getCoords()
-    #offset = ssp.get_center_coord_offset(coords)
-    #for atoms in pdb_atoms:
-    #    atoms.setCoords(atoms.getCoords() - offset)
+    atoms = pdb_atoms[0]
+    coords = atoms.getCoords()
+    offset = ssp.get_center_coord_offset(coords)
+    for atoms in pdb_atoms:
+        atoms.setCoords(atoms.getCoords() - offset)
         
     # Make B-factored volumes (will be considered ground truth)     
-    #Bfaced_vols = len(pdb_atoms)*[None]
-    #for idx, atoms in enumerate(pdb_atoms):
-    #    volume = ssp.generate_molecule_spectrum_from_pdb_id(atoms, voxel_size = voxel_size,  grid_size = grid_size, do_center_atoms = False, from_atom_group = True)
-    #    Bfaced_vols[idx] = simulator.Bfactorize_vol(volume.reshape(-1), voxel_size, Bfactor, volume_shape)
+    Bfaced_vols = len(pdb_atoms)*[None]
+    for idx, atoms in enumerate(pdb_atoms):
+        volume = ssp.generate_molecule_spectrum_from_pdb_id(atoms, voxel_size = voxel_size,  grid_size = grid_size, do_center_atoms = False, from_atom_group = True)
+        Bfaced_vols[idx] = simulator.Bfactorize_vol(volume.reshape(-1), voxel_size, Bfactor, volume_shape)
 
     volume_folder = output_folder + '/' + 'simulated_test_volumes/'
-    #output.mkdir_safe(volume_folder)
-    #output.save_volumes( Bfaced_vols, volume_folder, from_ft= True)
+    output.mkdir_safe(volume_folder)
+    output.save_volumes( Bfaced_vols, volume_folder, from_ft= True)
 
     ## Define density that volumes are resampled from
-    #def p(x):
-    #    means = [np.pi/2, np.pi, 3*np.pi/2]
-    #    kappas =  [6.0, 6.0, 6.0]
-    #    weights = np.array([2.0, 1.0, 2.0])
-    #    weights /= sum(weights)  
-    #    val = 0
-    #    for i in range(3): 
-    #        val += weights[i]*vonmises.pdf(x, loc=means[i], kappa=kappas[i])
-    #    return val
-
     def p(x):
-        means = [np.pi/2, 3*np.pi/2]
-        kappas =  [1.0, 1.0]
-        weights = np.array([2.0, 1.0])
+        means = [np.pi/2, np.pi, 3*np.pi/2]
+        kappas =  [6.0, 6.0, 6.0]
+        weights = np.array([2.0, 1.0, 2.0])
         weights /= sum(weights)  
         val = 0
-        for i in range(2): 
+        for i in range(3): 
             val += weights[i]*vonmises.pdf(x, loc=means[i], kappa=kappas[i])
         return val
+
+    #def p(x):
+    #    means = [np.pi/2, 3*np.pi/2]
+    #    kappas =  [1.0, 1.0]
+    #    weights = np.array([2.0, 1.0])
+    #    weights /= sum(weights)  
+    #    val = 0
+    #    for i in range(2): 
+    #        val += weights[i]*vonmises.pdf(x, loc=means[i], kappa=kappas[i])
+    #    return val
 
     x = np.linspace(0, 2*np.pi, 100)
     volume_distribution = p(x)
@@ -121,19 +121,19 @@ def main():
         print(f"Starting at noise level {idx} of {len(noise_levels)}, noise_level:{noise_level}") 
         # Generate dataset
         dataset_folder = output_folder + '/' + f'dataset{idx}/'
-        #image_stack, sim_info = simulator.generate_synthetic_dataset(dataset_folder, voxel_size, volume_folder, n_images,
-        #    outlier_file_input = None, grid_size = grid_size,
-        #    volume_distribution = volume_distribution,  dataset_params_option = "uniform", noise_level = noise_level,
-        #    noise_model = "white", put_extra_particles = False, percent_outliers = 0.00, 
-        #    volume_radius = 0.7, trailing_zero_format_in_vol_name = True, noise_scale_std = 0, contrast_std = 0, disc_type = disc_type_sim)
+        image_stack, sim_info = simulator.generate_synthetic_dataset(dataset_folder, voxel_size, volume_folder, n_images,
+            outlier_file_input = None, grid_size = grid_size,
+            volume_distribution = volume_distribution,  dataset_params_option = "uniform", noise_level = noise_level,
+            noise_model = "white", put_extra_particles = False, percent_outliers = 0.00, 
+            volume_radius = 0.7, trailing_zero_format_in_vol_name = True, noise_scale_std = 0, contrast_std = 0, disc_type = disc_type_sim)
         
-        #dataset_options = dataset.get_default_dataset_option()
-        #dataset_options['particles_file'] = dataset_folder + '/' + f'particles.{grid_size}.mrcs'
-        #dataset_options['ctf_file'] = dataset_folder + '/' + f'ctf.pkl'
-        #dataset_options['poses_file'] = dataset_folder + '/' + f'poses.pkl'
+        dataset_options = dataset.get_default_dataset_option()
+        dataset_options['particles_file'] = dataset_folder + '/' + f'particles.{grid_size}.mrcs'
+        dataset_options['ctf_file'] = dataset_folder + '/' + f'ctf.pkl'
+        dataset_options['poses_file'] = dataset_folder + '/' + f'poses.pkl'
         
         ## Dump results to file
-        #recovar.utils.pickle_dump( sim_info, dataset_folder + '/' + 'sim_info.pkl')
+        recovar.utils.pickle_dump( sim_info, dataset_folder + '/' + 'sim_info.pkl')
 
         sim_info = recovar.utils.pickle_load(dataset_folder + '/' + 'sim_info.pkl')
 
