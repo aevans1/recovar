@@ -72,9 +72,10 @@ def _cache_root() -> pathlib.Path:
     if override:
         return pathlib.Path(override).expanduser()
 
-    xdg_cache_home = os.environ.get("XDG_CACHE_HOME")
-    if xdg_cache_home:
-        return pathlib.Path(xdg_cache_home).expanduser() / "recovar" / "cuda"
+    # Lukes hotfix for a path issue here!
+    #xdg_cache_home = os.environ.get("XDG_CACHE_HOME")
+    #if xdg_cache_home:
+    #    return pathlib.Path(xdg_cache_home).expanduser() / "recovar" / "cuda"
 
     return pathlib.Path.home().expanduser() / ".cache" / "recovar" / "cuda"
 
