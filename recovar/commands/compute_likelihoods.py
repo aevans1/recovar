@@ -94,8 +94,11 @@ def compute_likelihoods_point_cloud(recovar_result_dir, output_dir, zdim=2, perc
     ## Save covariances, for diagnostics
     #np.save(f"{output_dir}/cov_zs_{zdim}.npy", cov_zs)
 
-
-if __name__ == "__main__":
+def main():
     args = parse_args()
     compute_likelihoods_2d_grid(recovar_result_dir=args.recovar_result_dir,
                                 output_dir=args.output_dir)
+
+if __name__ == "__main__":
+    main()
+    
