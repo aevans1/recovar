@@ -276,20 +276,21 @@ def compute_latent_log_likelihood(test_pts, zs, cov_zs):
         raise ValueError(f"cov_zs.ndim ({cov_zs.ndim}) must be zs.ndim+1 ({zs.ndim + 1})")
 
     det_cov_zs = compute_log_det_cov(cov_zs)
-    quads = np.zeros([zs.shape[0], test_pts.shape[0]])
     n_images = zs.shape[0]
 
     batch_size_x = utils.get_latent_density_batch_size(test_pts, zs.shape[-1], utils.get_gpu_memory_total())
     logger.info("batch size in latent computation: %s", batch_size_x)
-    logger.warning("SHOULD THIS BE SCALED?")
+    #logger.warning("SHOULD THIS BE SCALED?")
+    
+    chunks = [] 
     for k in range(0, utils.get_number_of_index_batch(n_images, batch_size_x)):
         batch_st, batch_end = utils.get_batch_of_indices(n_images, batch_size_x, k)
-        quads[batch_st:batch_end, :] = 0.5 * (
+        chunks.append(0.5 * (
             compute_latent_quadratic_forms(test_pts.real, zs[batch_st:batch_end].real, cov_zs[batch_st:batch_end])
             - det_cov_zs[batch_st:batch_end][..., None]
-        )
+        ))
 
-    return quads
+    return jnp.concatenate(chunks, axis=0)
 
 
 @jax.jit
