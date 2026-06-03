@@ -9,25 +9,69 @@ import tqdm
 
 from recovar.heterogeneity import latent_density as ld
 from recovar.output import output as o
-
+from recovar import utils
 
 XLA_PYTHON_CLIENT_PREALLOCATE=False
 
 
+#### Experimental, batching images and confs
 
-#for i in tqdm(range(0, len(dataset), batch_size)):
-#    batch_indices = np.arange(i, min(i + batch_size, len(dataset)))
-#    particle_stack = dataset[batch_indices]
-#    particle_stack = normalize_stack(particle_stack, whitening_filter)
-#
-#    for i in range(len(volumes)):
-#        log_likelihood_matrix[batch_indices, i] = compute_likelihoods(
-#            volumes[i],
-#            particle_stack,
-#            dilated_mask,
-#            image_sign,
-#            whitening_filter,
-#        )
+#@jax.jit
+#def grad_sum_denom(u, weights):
+#    """jit compiling last isolated part of the gradient"""
+#    denominator = u @ weights 
+#    return jnp.sum(u / denominator[:, None], axis=0)
+
+@jax.jit
+def normalize_keep_constant(v):
+    max_entry = jnp.amax(v, axis=1)[:, None]
+    v -= max_entry
+    out = jnp.exp(v)
+    return out, max_entry
+
+def compute_denom_image_batch(zs_batch, cov_zs_batch, zs_grid, batch_size=1000):
+    """jit compiling last isolated part of the gradient"""
+
+    denominator = jnp.zeros(zs_batch.shape[0])
+    max_entries = [] 
+    for j in range(0, len(zs_grid), batch_size): 
+        end_idx = min(j + batch_size, zs_grid.shape[0])
+        log_likelihood_zs_nodes_batch = -1*ld.compute_latent_log_likelihood(zs_grid[j:end_idx], zs_batch, cov_zs_batch, batch_size=batch_size)
+        out, max_entry = normalize_keep_constant(log_likelihood_zs_nodes_batch)   
+        denominator += out*jnp.exp(max_entry - max_entries[j])
+        max_entries.append(max_entry)
+    c = jnp.amax(jnp.concatenate(max_entries))
+    print(c.shape)
+    return denominator*jnp.exp(-c), c
+
+@eqx.filter_jit
+def _compute_grad_batch_alt(weights, denom_vector, zs_batch, cov_zs_batch, zs_grid, batch_size=1000):
+    """gradient computation, in batches of images AND latents"""
+    
+
+    for j in range(0, len(zs_grid), batch_size):
+        end_idx = min(j + batch_size, zs_grid.shape[0])
+        log_likelihood_zs_nodes_batch = -1*ld.compute_latent_log_likelihood(zs_grid[j:end_idx], zs_batch, cov_zs_batch, batch_size=batch_size)
+
+    #likelihood_zs_nodes_batch = likelihood_zs_nodes_batch*jnp.exp
+
+    return grad_sum_denom(likelihood_zs_batch, weights)
+
+def compute_grad_alt(weights, zs, cov_zs, zs_grid, batch_size=1000):
+    grad = jnp.zeros(weights.shape[0])
+    for i in range(0, len(zs), batch_size):
+        end_idx = min(i + batch_size, zs.shape[0])
+        
+        # First pass, compute denominator for the batch
+        denom_vector, c = compute_denom_image_batch(zs[i:end_idx], cov_zs[i:end_idx], zs_grid, batch_size=batch_size) 
+        grad = _compute_grad_batch_alt(weights, denom_vector, zs[i:end_idx], cov_zs[i:end_idx], zs_grid, batch_size=batch_size)    
+        
+    
+    grad /= len(zs)
+    return grad
+
+#### ^^^^^^^^^^^^^
+#### Experimental, batching images and confs
 
 @jax.jit
 def normalize_log_likeli_to_likeli(log_likelihood):
@@ -51,22 +95,23 @@ def normalize_log_likeli_to_likeli(log_likelihood):
     likelihood = jnp.exp(log_likelihood)
     return likelihood
 
-
 @eqx.filter_jit
-def _compute_grad_batch(weights, zs_batch, cov_zs_batch, zs_grid):
-    """JIT-compiled gradient computation, in batches"""
-    log_likelihood_zs_batch = -1*ld.compute_latent_log_likelihood(zs_grid, zs_batch, cov_zs_batch)
+def _compute_grad_batch(weights, zs_batch, cov_zs_batch, zs_grid, batch_size=1000):
+    """gradient computation, in batches"""
+    log_likelihood_zs_batch = -1*ld.compute_latent_log_likelihood(zs_grid, zs_batch, cov_zs_batch, batch_size=batch_size)
     likelihood_zs_batch = normalize_log_likeli_to_likeli(log_likelihood_zs_batch)
-    denominator = likelihood_zs_batch @ weights 
-    return jnp.sum(likelihood_zs_batch / denominator[:, None], axis=0)
+    return grad_sum_denom(likelihood_zs_batch, weights)
 
-def compute_grad(weights, zs, cov_zs, zs_grid, batch_size=100):
+def compute_grad(weights, zs, cov_zs, zs_grid, batch_size=1000):
     grad = jnp.zeros(weights.shape[0])
     for i in range(0, len(zs), batch_size):
         end_idx = min(i + batch_size, zs.shape[0])
-        grad += _compute_grad_batch(weights, zs[i:end_idx], cov_zs[i:end_idx], zs_grid)
+
+        grad += _compute_grad_batch(weights, zs[i:end_idx], cov_zs[i:end_idx], zs_grid, batch_size=batch_size)
     grad /= len(zs)
     return grad
+
+
 
 @jax.jit
 def update_weights(weights, grad):
@@ -147,6 +192,12 @@ def online_multiplicative_gradient(
     # Initialize weights
     weights = (1/num_nodes)*jnp.ones(num_nodes)
 
+
+    # Getting batch size from GPU
+    batch_size_zs = 1000 
+    #batch_size_zs = utils.get_latent_density_batch_size(nodes, zs.shape[-1], utils.get_gpu_memory_total())
+    #print(f"batch size zs: {batch_size_zs}")
+
     #TODO: per line of the gradient, normalize the log likelihood
     # Convert log likelihood to likelihood via "soft-max"-ish operation
     #likelihood = normalize_log_likeli_to_likeli(log_likelihood)
@@ -155,9 +206,10 @@ def online_multiplicative_gradient(
     gap_scale = scaled_gap(compute_grad(weights, zs, cov_zs, nodes), weights, scale=1.0)
 
     reached_gap = False
+
     for k in range(max_iterations):
         # Update grad
-        grad = compute_grad(weights, zs, cov_zs, nodes)
+        grad = compute_grad(weights, zs, cov_zs, nodes, batch_size=batch_size_zs)
         print(k)
         # Check stopping criterions
         gap = scaled_gap(grad, weights, gap_scale)
@@ -285,8 +337,7 @@ def main():
     #)
     weights = online_multiplicative_gradient(recovar_result_dir,
                                              zdim=zdim,
-                                             max_iterations=10,
-                                             tol=-1
+                                             tol=1e-2
     )
     
     jnp.savez(f"weights_online_zdim_{zdim}.npy", weights) 
