@@ -5,7 +5,6 @@ import equinox as eqx
 import matplotlib.pyplot as plt
 
 import os
-import tqdm
 
 from recovar.heterogeneity import latent_density as ld
 from recovar.output import output as o
@@ -13,63 +12,46 @@ from recovar import utils
 
 XLA_PYTHON_CLIENT_PREALLOCATE=False
 
-
 #### Experimental, batching images and confs
-
-#@jax.jit
-#def grad_sum_denom(u, weights):
-#    """jit compiling last isolated part of the gradient"""
-#    denominator = u @ weights 
-#    return jnp.sum(u / denominator[:, None], axis=0)
-
-@jax.jit
-def normalize_keep_constant(v):
-    max_entry = jnp.amax(v, axis=1)[:, None]
-    v -= max_entry
-    out = jnp.exp(v)
-    return out, max_entry
-
-def compute_denom_image_batch(zs_batch, cov_zs_batch, zs_grid, batch_size=1000):
+@eqx.filter_jit
+def compute_denom_image_batch(weights, zs_batch, cov_zs_batch, zs_grid, batch_size=1000):
     """jit compiling last isolated part of the gradient"""
 
     denominator = jnp.zeros(zs_batch.shape[0])
-    max_entries = [] 
     for j in range(0, len(zs_grid), batch_size): 
         end_idx = min(j + batch_size, zs_grid.shape[0])
         log_likelihood_zs_nodes_batch = -1*ld.compute_latent_log_likelihood(zs_grid[j:end_idx], zs_batch, cov_zs_batch, batch_size=batch_size)
-        out, max_entry = normalize_keep_constant(log_likelihood_zs_nodes_batch)   
-        denominator += out*jnp.exp(max_entry - max_entries[j])
-        max_entries.append(max_entry)
-    c = jnp.amax(jnp.concatenate(max_entries))
-    print(c.shape)
-    return denominator*jnp.exp(-c), c
+        new_term = jax.scipy.special.logsumexp(a=log_likelihood_zs_nodes_batch, b=weights[j:end_idx], axis=1)
+        denominator += jnp.exp(new_term)
+    return denominator
 
 @eqx.filter_jit
-def _compute_grad_batch_alt(weights, denom_vector, zs_batch, cov_zs_batch, zs_grid, batch_size=1000):
+def _compute_grad_batch_alt(denominator, zs_batch, cov_zs_batch, zs_grid, batch_size=1000):
     """gradient computation, in batches of images AND latents"""
-    
 
+    chunks = []
     for j in range(0, len(zs_grid), batch_size):
         end_idx = min(j + batch_size, zs_grid.shape[0])
         log_likelihood_zs_nodes_batch = -1*ld.compute_latent_log_likelihood(zs_grid[j:end_idx], zs_batch, cov_zs_batch, batch_size=batch_size)
+        c = jnp.amax(log_likelihood_zs_nodes_batch, axis=1)
+        chunks.append(jnp.sum(jnp.exp(log_likelihood_zs_nodes_batch - c)*jnp.exp(c) / denominator[:, None], axis=0))
+    return jnp.concatenate(chunks)
 
-    #likelihood_zs_nodes_batch = likelihood_zs_nodes_batch*jnp.exp
-
-    return grad_sum_denom(likelihood_zs_batch, weights)
-
-def compute_grad_alt(weights, zs, cov_zs, zs_grid, batch_size=1000):
-    grad = jnp.zeros(weights.shape[0])
+def compute_grad(weights, zs, cov_zs, zs_grid, batch_size=1000):
+    grad = jnp.zeros(zs_grid.shape[0])
     for i in range(0, len(zs), batch_size):
         end_idx = min(i + batch_size, zs.shape[0])
-        
         # First pass, compute denominator for the batch
-        denom_vector, c = compute_denom_image_batch(zs[i:end_idx], cov_zs[i:end_idx], zs_grid, batch_size=batch_size) 
-        grad = _compute_grad_batch_alt(weights, denom_vector, zs[i:end_idx], cov_zs[i:end_idx], zs_grid, batch_size=batch_size)    
-        
-    
+        denominator = compute_denom_image_batch(weights, zs[i:end_idx], cov_zs[i:end_idx], zs_grid, batch_size=batch_size) 
+        #grad += _compute_grad_batch_alt(denominator, zs[i:end_idx], cov_zs[i:end_idx], zs_grid, batch_size=batch_size)
+        partial_grad = _compute_grad_batch_alt(denominator, zs[i:end_idx], cov_zs[i:end_idx], zs_grid, batch_size=batch_size)
+        grad = grad_aggregate(grad, partial_grad)
     grad /= len(zs)
     return grad
 
+@eqx.filter_jit
+def grad_aggregate(grad, term):
+    return grad + term
 #### ^^^^^^^^^^^^^
 #### Experimental, batching images and confs
 
@@ -95,23 +77,21 @@ def normalize_log_likeli_to_likeli(log_likelihood):
     likelihood = jnp.exp(log_likelihood)
     return likelihood
 
-@eqx.filter_jit
-def _compute_grad_batch(weights, zs_batch, cov_zs_batch, zs_grid, batch_size=1000):
-    """gradient computation, in batches"""
-    log_likelihood_zs_batch = -1*ld.compute_latent_log_likelihood(zs_grid, zs_batch, cov_zs_batch, batch_size=batch_size)
-    likelihood_zs_batch = normalize_log_likeli_to_likeli(log_likelihood_zs_batch)
-    return grad_sum_denom(likelihood_zs_batch, weights)
+#@eqx.filter_jit
+#def _compute_grad_batch(weights, zs_batch, cov_zs_batch, zs_grid, batch_size=1000):
+#    """gradient computation, in batches"""
+#    log_likelihood_zs_batch = -1*ld.compute_latent_log_likelihood(zs_grid, zs_batch, cov_zs_batch, batch_size=batch_size)
+#    likelihood_zs_batch = normalize_log_likeli_to_likeli(log_likelihood_zs_batch)
+#    return grad_sum_denom(likelihood_zs_batch, weights)
 
-def compute_grad(weights, zs, cov_zs, zs_grid, batch_size=1000):
-    grad = jnp.zeros(weights.shape[0])
-    for i in range(0, len(zs), batch_size):
-        end_idx = min(i + batch_size, zs.shape[0])
-
-        grad += _compute_grad_batch(weights, zs[i:end_idx], cov_zs[i:end_idx], zs_grid, batch_size=batch_size)
-    grad /= len(zs)
-    return grad
-
-
+#def compute_grad(weights, zs, cov_zs, zs_grid, batch_size=1000):
+#    grad = jnp.zeros(weights.shape[0])
+#    for i in range(0, len(zs), batch_size):
+#        end_idx = min(i + batch_size, zs.shape[0])
+#
+#        grad += _compute_grad_batch(weights, zs[i:end_idx], cov_zs[i:end_idx], zs_grid, batch_size=batch_size)
+#    grad /= len(zs)
+#    return grad
 
 @jax.jit
 def update_weights(weights, grad):
@@ -194,7 +174,7 @@ def online_multiplicative_gradient(
 
 
     # Getting batch size from GPU
-    batch_size_zs = 1000 
+    batch_size_zs = 50000 
     #batch_size_zs = utils.get_latent_density_batch_size(nodes, zs.shape[-1], utils.get_gpu_memory_total())
     #print(f"batch size zs: {batch_size_zs}")
 
@@ -213,7 +193,8 @@ def online_multiplicative_gradient(
         print(k)
         # Check stopping criterions
         gap = scaled_gap(grad, weights, gap_scale)
-
+        print(gap)
+        print(jnp.sum(weights))
         # Check current gap against tolerance
         if not reached_gap and gap < tol:
             print(f"reached gap tolerance, at idx: {k}")
@@ -308,8 +289,8 @@ def main():
     #os.makedirs(data_dir, exist_ok=True)
 
     # Set up pretty plots 
-    plt.style.use("my_style.mplstyle") # Use stylefile defined
-    plt.style.use("seaborn-v0_8-colorblind") # Use colorscheme from colorblind seaborn
+    #plt.style.use("my_style.mplstyle") # Use stylefile defined
+    #plt.style.use("seaborn-v0_8-colorblind") # Use colorscheme from colorblind seaborn
 
     # Load grid
     #grid = jnp.load("/mnt/home/levans/ceph/archive/cryo_reweighting_examples/latent_example/zs_grid_new.npy")
@@ -337,7 +318,8 @@ def main():
     #)
     weights = online_multiplicative_gradient(recovar_result_dir,
                                              zdim=zdim,
-                                             tol=1e-2
+                                             tol=1e-2,
+                                             max_iterations=145
     )
     
     jnp.savez(f"weights_online_zdim_{zdim}.npy", weights) 
