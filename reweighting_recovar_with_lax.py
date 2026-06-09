@@ -1,3 +1,6 @@
+
+XLA_PYTHON_CLIENT_PREALLOCATE=False
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -10,131 +13,100 @@ from recovar.heterogeneity import latent_density as ld
 from recovar.output import output as o
 from recovar import utils
 
-XLA_PYTHON_CLIENT_PREALLOCATE=False
-
 ### Custom exp stuff
 @eqx.filter_jit
 def custom_exp_normalize(arr, axis): 
-   c = jnp.amax(arr, axis=axis)[:, None]
+   c = jnp.amax(arr, axis=axis, keepdims=True)
    return jnp.exp(arr - c)*jnp.exp(c)
 
 #### Experimental, batching images AND confs
-@eqx.filter_jit
 def compute_denom_image_batch(weights, zs_batch, cov_zs_batch, zs_grid, batch_size=1000):
     """jit compiling last isolated part of the gradient"""
-    
-    # Batching through zs_grid, getting batch size and padding 
     num_nodes = zs_grid.shape[0]
-    num_chunks = (num_nodes + batch_size - 1) // batch_size
-    padded_size = num_chunks * batch_size
-    pad = padded_size - num_nodes
-
-    zs_grid_padded = jnp.concatenate([zs_grid, jnp.zeros((pad, zs_grid.shape[-1]))], axis=0)
-    weights_padded = jnp.concatenate([weights, jnp.zeros((pad, zs_grid.shape[-1]))], axis=0)
-
+    num_full_chunks = num_nodes // batch_size
+    remainder = num_nodes % batch_size
     def body_fn(carry, idx):
         denominator = carry
-        grid_chunk = jax.lax.dynamic_slice_in_dim(zs_grid_padded, idx*batch_size, batch_size, axis=0)
-        weights_chunk = jax.lax.dynamic_slice_in_dim(weights_padded, idx*batch_size, batch_size, axis=0)
+        grid_chunk = jax.lax.dynamic_slice_in_dim(zs_grid, idx*batch_size, batch_size, axis=0)
+        weights_chunk = jax.lax.dynamic_slice_in_dim(weights, idx*batch_size, batch_size, axis=0)
         log_likelihood_batch = -1*ld.compute_latent_log_likelihood(grid_chunk, zs_batch, cov_zs_batch, batch_size=batch_size)
-        denominator += custom_exp_normalize(log_likelihood_batch, axis=1) @ weights_chunk
-        return denominator, None
+        return carry + custom_exp_normalize(log_likelihood_batch, axis=1) @ weights_chunk, None
 
     denominator_init = jnp.zeros(zs_batch.shape[0])
-    denominator, _ = jax.lax.scan(body_fn, denominator_init, jnp.arange(num_chunks))
-    return denominator
+    denominator, _ = jax.lax.scan(body_fn, denominator_init, jnp.arange(num_full_chunks))
 
+    # Add remainder batch 
+    def compute_remainder_batch(denominator):
+        grid_chunk = zs_grid[num_full_chunks*batch_size:]
+        weights_chunk = weights[num_full_chunks*batch_size:]
+        log_likelihood_batch = -1*ld.compute_latent_log_likelihood(grid_chunk, zs_batch, cov_zs_batch, batch_size=batch_size)
+        denominator += custom_exp_normalize(log_likelihood_batch, axis=1) @ weights_chunk
+        return denominator
+
+    # Add conditional here because we can't jit compile through a usual conditioning
+    print(remainder)
+    denominator = jax.lax.cond(remainder > 0, compute_remainder_batch, lambda g: g, denominator) 
+    return denominator
+ 
 
 def _compute_grad_batch_alt(denominator, zs_batch, cov_zs_batch, zs_grid, batch_size=1000):
     """gradient computation, in batches of images AND latents"""
-    # Batching through zs_grid, getting batch size and padding 
     num_nodes = zs_grid.shape[0]
-    num_chunks = (num_nodes + batch_size - 1) // batch_size
-    padded_size = num_chunks * batch_size
-    pad = padded_size - num_nodes
+    num_full_chunks = num_nodes // batch_size
+    remainder = num_nodes % batch_size
 
-    zs_grid_padded = jnp.concatenate([zs_grid, jnp.zeros((pad, zs_grid.shape[-1]))], axis=0)
-    
     def body_fn(grad_batch_accum, idx):
-        grid_chunk = jax.lax.dynamic_slice_in_dim(zs_grid_padded, idx*batch_size, batch_size, axis=0)
+        grid_chunk = jax.lax.dynamic_slice_in_dim(zs_grid, idx*batch_size, batch_size, axis=0)
         log_likelihood_batch = -1*ld.compute_latent_log_likelihood(grid_chunk, zs_batch, cov_zs_batch, batch_size=batch_size)
         val = jnp.sum(custom_exp_normalize(log_likelihood_batch, axis=1) / denominator[:, None], axis=0)
         grad_batch_accum = jax.lax.dynamic_update_slice(grad_batch_accum, val, (idx*batch_size,))
         return grad_batch_accum, None
 
     grad_batch_init = jnp.zeros(zs_grid.shape[0]) 
-    grad_batch, _ = jax.lax.scan(body_fn, grad_batch_init, jnp.arange(num_chunks))
+    grad_batch, _ = jax.lax.scan(body_fn, grad_batch_init, jnp.arange(num_full_chunks))
+
+    # Add remainder batch 
+    def compute_remainder_batch(grad_batch):
+        grid_chunk = zs_grid[num_full_chunks*batch_size:]
+        log_likelihood_batch = -1*ld.compute_latent_log_likelihood(grid_chunk, zs_batch, cov_zs_batch, batch_size=batch_size)
+        val = jnp.sum(custom_exp_normalize(log_likelihood_batch, axis=1) / denominator[:, None], axis=0)
+        grad_batch = grad_batch.at[num_full_chunks*batch_size:].set(val)
+        return grad_batch
+
+    # Add conditional here because we can't jit compile through a usual conditioning
+    grad_batch = jax.lax.cond(remainder > 0, compute_remainder_batch, lambda g: g, grad_batch) 
     return grad_batch 
     
-
-@eqx.filter_jit
 def compute_grad(weights, zs, cov_zs, zs_grid, batch_size=1000):
-    # Batching through zs, getting batch size and padding 
+    # Batching through zs, getting full batches and remainder batch 
     num_data = zs.shape[0]
-    num_chunks = (num_data + batch_size - 1) // batch_size
-    padded_size = num_chunks * batch_size
-    pad = padded_size - num_data
-    zs_padded = jnp.concatenate([zs, jnp.zeros((pad, zs.shape[-1]))], axis=0)
-    cov_zs_padded = jnp.concatenate([cov_zs, jnp.zeros((pad, cov_zs.shape[1:]))], axis=0)
-
+    num_full_chunks = num_data // batch_size
+    remainder = num_data % batch_size
+    
+    # Compute grad for batches of full size 
     def body_fn(accum, idx):
         grad = accum 
-        zs_chunk = jax.lax.dynamic_slice_in_dim(zs_padded, idx*batch_size, batch_size, axis=0)
-        cov_zs_chunk = jax.lax.dynamic_slice_in_dim(cov_zs_padded, idx*batch_size, batch_size, axis=0)
+        zs_chunk = jax.lax.dynamic_slice_in_dim(zs, idx*batch_size, batch_size, axis=0)
+        cov_zs_chunk = jax.lax.dynamic_slice_in_dim(cov_zs, idx*batch_size, batch_size, axis=0)
         denominator = compute_denom_image_batch(weights, zs_chunk, cov_zs_chunk, zs_grid, batch_size=batch_size) 
         val = _compute_grad_batch_alt(denominator, zs_chunk, cov_zs_chunk, zs_grid, batch_size=batch_size)
         return grad + (1 / zs.shape[0])*val, None
 
     grad_init = jnp.zeros(zs_grid.shape[0])
-    grad, _ = jax.lax.scan(body_fn, grad_init, jnp.arange(num_chunks))
+    grad, _ = jax.lax.scan(body_fn, grad_init, jnp.arange(num_full_chunks))
+    
+    # Add grad for remainder batch 
+    def compute_remainder_batch(grad):
+        zs_chunk = zs[num_full_chunks*batch_size:]
+        cov_zs_chunk = cov_zs[num_full_chunks*batch_size:]
+        denominator = compute_denom_image_batch(weights, zs_chunk, cov_zs_chunk, zs_grid, batch_size=batch_size) 
+        val = _compute_grad_batch_alt(denominator, zs_chunk, cov_zs_chunk, zs_grid, batch_size=batch_size)
+        return grad + (1 / zs.shape[0])*val
+
+    # Add conditional here because we can't jit compile through a usual conditioning
+    grad = jax.lax.cond(remainder > 0, compute_remainder_batch, lambda g: g, grad) 
+    
     return grad
-
-#### ^^^^^^^^^^^^^
-#### Experimental, batching images and confs
-
-
-@jax.jit
-def normalize_log_likeli_to_likeli(log_likelihood):
-    """
-    Subtracts the largest entry from each row of  the log likelihood.
-    This is for stability, before transforming to likelihood (like in a soft-max) 
-    The gradient is invariant to row scaling of likelihood, so this is valid.
-    With this normalizing, we avoid working in log space for the grad and loss.
-
-    Parameters
-    ----------
-    log_likelihood : jax.Array
-        log_likelihood of data-point i from node j.
-        must be of shape (num_data x num_nodes) 
-
-    Returns
-    -------
-    likelihood: jax.Array
-    """
-    log_likelihood -= jnp.amax(log_likelihood, axis=1)[:, None]
-    likelihood = jnp.exp(log_likelihood)
-    return likelihood
-
-
-def grad_sum_denom(likelihood_zs_batch, weights):
-    denom = likelihood_zs_batch @ weights
-    return jnp.sum(likelihood_zs_batch / denom[:, None], axis=0) 
-
-@eqx.filter_jit
-def _compute_grad_batch(weights, zs_batch, cov_zs_batch, zs_grid, batch_size=1000):
-    """gradient computation, in batches"""
-    log_likelihood_zs_batch = -1*ld.compute_latent_log_likelihood(zs_grid, zs_batch, cov_zs_batch, batch_size=batch_size)
-    likelihood_zs_batch = normalize_log_likeli_to_likeli(log_likelihood_zs_batch)
-    return grad_sum_denom(likelihood_zs_batch, weights)
-
-#def compute_grad(weights, zs, cov_zs, zs_grid, batch_size=1000):
-#    grad = jnp.zeros(weights.shape[0])
-#    for i in range(0, len(zs), batch_size):
-#        end_idx = min(i + batch_size, zs.shape[0])
-#
-#        grad += _compute_grad_batch(weights, zs[i:end_idx], cov_zs[i:end_idx], zs_grid, batch_size=batch_size)
-#    grad /= len(zs)
-#    return grad
 
 @jax.jit
 def update_weights(weights, grad):
@@ -217,7 +189,7 @@ def online_multiplicative_gradient(
     weights = (1/num_nodes)*jnp.ones(num_nodes)
 
     # Getting batch size from GPU
-    batch_size_zs = 12000 
+    batch_size_zs = 25000 
     #batch_size_zs = utils.get_latent_density_batch_size(nodes, zs.shape[-1], utils.get_gpu_memory_total())
     #print(f"batch size zs: {batch_size_zs}")
 
@@ -355,14 +327,14 @@ def main():
     #this code will plot `weights` returned above as the max iteration weights in the plots: 
     recovar_result_dir="/mnt/home/levans/ceph/recovar_testing/bad_histogram_igg/_given_mask_with_correct_contrast"
     
-    zdim=2
+    zdim=4
     ##weights = online_multiplicative_gradient(recovar_result_dir,
     ##                                               zdim=2
     ##)
     weights = online_multiplicative_gradient(recovar_result_dir,
                                              zdim=zdim,
                                              tol=1e-8,
-                                             max_iterations=50
+                                             max_iterations=50,
     )
     
     #jnp.save(f"weights_online_zdim_{zdim}.npy", weights) 
