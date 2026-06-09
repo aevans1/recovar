@@ -174,7 +174,7 @@ def online_multiplicative_gradient(
 
 
     # Getting batch size from GPU
-    batch_size_zs = 50000 
+    batch_size_zs = 10000 
     #batch_size_zs = utils.get_latent_density_batch_size(nodes, zs.shape[-1], utils.get_gpu_memory_total())
     #print(f"batch size zs: {batch_size_zs}")
 
@@ -183,7 +183,7 @@ def online_multiplicative_gradient(
     #likelihood = normalize_log_likeli_to_likeli(log_likelihood)
   
     # Initialize scaling for gap stopping criteria
-    gap_scale = scaled_gap(compute_grad(weights, zs, cov_zs, nodes), weights, scale=1.0)
+    gap_scale = scaled_gap(compute_grad(weights, zs, cov_zs, nodes, batch_size=batch_size_zs), weights, scale=1.0)
 
     reached_gap = False
 
