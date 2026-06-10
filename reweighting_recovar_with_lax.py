@@ -74,6 +74,7 @@ def compute_denom_and_grad_image_batch(weights, zs_batch, cov_zs_batch, zs_grid,
 
 def compute_grad(weights, zs, cov_zs, zs_grid, batch_size_zs=1000, batch_size_nodes=1000):
     """Gradient computation, batched over zs (embedded images), and batched over zs_grid (latent volumes/confs). 
+    
     For the batching, a log likelihood matrix cannot be pre-computed, its pre-computed at iteration.
     This is a naive first try at this, maybe there is a way of caching some of these to not re-use on subsequent evaluations....
     This is a batched version of the following code, with its own docstring: 
