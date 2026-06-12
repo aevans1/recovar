@@ -24,13 +24,12 @@ def parse_args():
         help="Directory to save the density estimation results. Default = recovar_result_dir/density/",
     )
     from recovar.utils.parser_args import add_output_name_arg, add_project_arg
-
     add_project_arg(parser)
     add_output_name_arg(parser)
     parser.add_argument(
         "--pca_dim",
         type=int,
-        default=4,
+        default=2,
         help="Dimension of PCA space in which the density is estimated (default 4). The runtime increases exponentially with this number, so <=5 is recommended.",
     )
     parser.add_argument(
@@ -46,7 +45,7 @@ def parse_args():
         help="Percentile of data to reject b/c they have large covariance (default 10%%)",
     )
     parser.add_argument(
-        "--num_disc_points",
+        "--num_points_per_dim",
         type=int,
         default=None,
         help="Number of discretization points in each dimension for the grid density estimation. Default = 50 for dim >3, 100 for dim = 3, 200 for dim = 2",
@@ -57,6 +56,19 @@ def parse_args():
         default=1,
         help="Rejects zs with coordinates above this bound for deciding the bounds of the grid (default 1 =1%%)",
     )
+    parser.add_argument(
+        "--batch_size_zs",
+        type=int,
+        default=10000,
+        help="Batch size of embedded images (zs) to use in online density estimation algorithm (default 10000)",
+    )
+    parser.add_argument(
+        "--batch_size_nodes",
+        type=int,
+        default=10000,
+        help="Batch size of nodes (grid points) to use in online density estimation algorithm (default 10000)",
+    )
+
     return parser.parse_args()
 
 
@@ -85,7 +97,7 @@ def estimate_conformational_density_alt(
     if pca_dim > z_dim_used:
         raise ValueError(f"pca_dim {pca_dim} should be less than or equal to z_dim_used {z_dim_used}")
     if pca_dim > 3:
-        raise ValueError(f"pca_dim {pca_dim} should be less than or equal to 4. It will take very long for 4 dimension, at it's current implementation.")
+        logger.info("pca_dim {pca_dim} should be less than or equal to 4. It is set larger than 3, and it will take very long for 4 dimension, at it's current implementation.")
 
     output_dir = Path(output_dir).expanduser().resolve() if output_dir is not None else recovar_result_dir / "density_alt"
     output.mkdir_safe(str(output_dir))
@@ -94,19 +106,18 @@ def estimate_conformational_density_alt(
     output.mkdir_safe(str(plots_dir))
     output.mkdir_safe(str(data_dir))
 
-    density = calibrate_density.multiplicative_gradient(
+    density = calibrate_density.online_multiplicative_gradient(
             pipeline_output,
             zdim=z_dim_used,
             noreg=True,
             pca_dim_max=pca_dim,
             percentile_reject=percentile_reject,
             num_points_per_dim=num_points_per_dim,
-            tol=1e-6,
-            max_iterations=10,
+            tol=1e-4,
+            max_iterations=1000,
             batch_size_zs=batch_size_zs,
             batch_size_nodes=batch_size_nodes
         )
-    )
     logger.info("Deconvolution done, size = %s", density.shape)
     calibrate_density.plot_density(density)
     plt.savefig(str(plots_dir / "density.png"))
@@ -137,17 +148,17 @@ def main():
 
     from recovar.project.job_context import job_context
 
-    with job_context(args, "estimate_conformational_density") as ctx:
+    with job_context(args, "estimate_conformational_density_alt") as ctx:
         result_dir = ctx.pipeline_dir or args.recovar_result_dir
-        estimate_conformational_density(
+        estimate_conformational_density_alt(
             recovar_result_dir=result_dir,
             output_dir=ctx.output_dir,
             pca_dim=args.pca_dim,
             z_dim_used=args.z_dim_used,
             percentile_reject=args.percentile_reject,
-            num_disc_points=args.num_disc_points,
-            alphas=args.alphas,
-            percentile_bound=args.percentile_bound,
+            num_points_per_dim=args.num_points_per_dim,
+            batch_size_zs=args.batch_size_zs,
+            batch_size_nodes=args.batch_size_nodes
         )
 
 
