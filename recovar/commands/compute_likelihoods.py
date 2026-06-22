@@ -21,7 +21,7 @@ def parse_args():
     )
     return parser.parse_args()
 
-def compute_likelihoods_2d_grid(recovar_result_dir, output_dir, percentile_reject=10, percentile=1, reg=False):
+def compute_likelihoods_2d_grid(recovar_result_dir, percentile_reject=10, percentile=1, reg=False):
     path =  os.path.abspath(recovar_result_dir + '/')
     po = o.PipelineOutput(path)
 
@@ -47,9 +47,8 @@ def compute_likelihoods_2d_grid(recovar_result_dir, output_dir, percentile_rejec
 
     ## compute likelihoods on the grid
     log_likelihood_zs_grid = ld.compute_latent_log_likelihood(zs_grid, zs, cov_zs)
-    jnp.save(f"{output_dir}/log_likelihood_zs_grid_zdim_2.npy", log_likelihood_zs_grid)
-    jnp.save(f"{output_dir}/zs_grid_zdim_2", zs_grid)
-
+    return log_likelihood_zs_grid, zs_grid
+    
 def compute_likelihoods_point_cloud(recovar_result_dir, output_dir, zdim=2, percentile_reject=10, reg=False):
     path =  os.path.abspath(recovar_result_dir + '/')
     po = o.PipelineOutput(path)
@@ -96,8 +95,11 @@ def compute_likelihoods_point_cloud(recovar_result_dir, output_dir, zdim=2, perc
 
 def main():
     args = parse_args()
-    compute_likelihoods_2d_grid(recovar_result_dir=args.recovar_result_dir,
-                                output_dir=args.output_dir)
+    recovar_result_dir = args.recovar_result_dir
+    output_dir = args.output_dir
+    log_likelihood_zs_grid, zs_grid = compute_likelihoods_2d_grid(recovar_result_dir)
+    jnp.save(f"{output_dir}/log_likelihood_zs_grid_zdim_2.npy", log_likelihood_zs_grid)
+    jnp.save(f"{output_dir}/zs_grid_zdim_2", zs_grid)
 
 if __name__ == "__main__":
     main()

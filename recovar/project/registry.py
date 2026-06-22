@@ -71,6 +71,13 @@ JOB_TYPES = {
         True,
         "Deconvolved conformational density",
     ),
+    "estimate_conformational_density_alt": JobType(
+        "Density_alt",
+        "estimate_conformational_density_alt",
+        False,
+        True,
+        "Deconvolved conformational density, alternate method",
+    ),
     "estimate_stable_states": JobType(
         "StableStates",
         "estimate_stable_states",

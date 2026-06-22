@@ -123,6 +123,10 @@ def default_job_alias(command_name: str, params: Mapping[str, Any] | None = None
         zdim = _coerce_int(params.get("z_dim_used")) or _coerce_int(params.get("pca_dim"))
         return f"density_k{zdim}" if zdim else "density"
 
+    if command == "estimate_conformational_density_alt":
+        zdim = _coerce_int(params.get("z_dim_used")) or _coerce_int(params.get("pca_dim"))
+        return f"density_k{zdim}_alt" if zdim else "density_alt"
+
     if command == "estimate_stable_states":
         return "stable_states"
 
@@ -173,6 +177,7 @@ def infer_job_display_name(
         "ComputeTrajectory": "compute_trajectory",
         "ReconstructTrajectory": "compute_trajectory",
         "Density": "estimate_conformational_density",
+        "Density_alt": "estimate_conformational_density_alt",
         "StableStates": "estimate_stable_states",
         "JunkDetection": "junk_particle_detection",
         "OutlierDetection": "outlier_detection",
