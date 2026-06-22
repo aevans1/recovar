@@ -30,13 +30,13 @@ def parse_args():
         "--pca_dim",
         type=int,
         default=2,
-        help="Dimension of PCA space in which the density is estimated (default 4). The runtime increases exponentially with this number, so <=5 is recommended.",
+        help="Dimension of PCA space in which the density is estimated (default 2). <=4 is recommended.",
     )
     parser.add_argument(
         "--z_dim_used",
         type=int,
         default=None,
-        help="Dimension of latent variable used (default smallest zdim stored >= pca_dim). Should be at least as big as pca_dim, and should be one of the dims used in analyze.py",
+        help="Dimension of the embeddings to load in (default smallest z_dim_used stored >= pca_dim). Should be at least as big as pca_dim, and should be one of the dims used in analyze.py",
     )
     parser.add_argument(
         "--percentile_reject",
@@ -55,6 +55,12 @@ def parse_args():
         type=int,
         default=1,
         help="Rejects zs with coordinates above this bound for deciding the bounds of the grid (default 1 =1%%)",
+    )
+    parser.add_argument(
+        "--online",
+        type=bool,
+        default=True,
+        help="If true, recomputes likelihood at each gradient iteration, to save memory. Use if large number of images or nodes."
     )
     parser.add_argument(
         "--batch_size_zs",
@@ -79,6 +85,7 @@ def estimate_conformational_density_alt(
     z_dim_used=4,
     percentile_reject=10,
     num_points_per_dim=None,
+    online=True,
     batch_size_zs=10000,
     batch_size_nodes=10000
 ):
@@ -90,14 +97,14 @@ def estimate_conformational_density_alt(
     pipeline_output = output.PipelineOutput(str(recovar_result_dir))
 
     if z_dim_used is None:
-        z_dim_all = np.asarray(pipeline_output.get("input_args").zdim)
-        z_dim_all = z_dim_all[z_dim_all >= pca_dim]
-        z_dim_used = np.min(z_dim_all)
+        z_dim_used_all = np.asarray(pipeline_output.get("input_args").zdim)
+        z_dim_used_all = z_dim_used_all[z_dim_used_all >= pca_dim]
+        z_dim_used = np.min(z_dim_used_all)
 
     if pca_dim > z_dim_used:
-        raise ValueError(f"pca_dim {pca_dim} should be less than or equal to z_dim_used {z_dim_used}")
+        raise ValueError(f"pca_dim is {pca_dim}, should be less than or equal to z_dim_used {z_dim_used}")
     if pca_dim > 3:
-        logger.info("pca_dim {pca_dim} should be less than or equal to 4. It is set larger than 3, and it will take very long for 4 dimension, at it's current implementation.")
+        logger.info(f"pca_dim is {pca_dim}, should be less than or equal to 4. It is set larger than 3, and it will take very long for 4 dimensions, at it's current implementation.")
 
     output_dir = Path(output_dir).expanduser().resolve() if output_dir is not None else recovar_result_dir / "density_alt"
     output.mkdir_safe(str(output_dir))
@@ -106,21 +113,23 @@ def estimate_conformational_density_alt(
     output.mkdir_safe(str(plots_dir))
     output.mkdir_safe(str(data_dir))
 
-    density = calibrate_density.online_multiplicative_gradient(
+    density, losses, gaps = calibrate_density.multiplicative_gradient(
             pipeline_output,
-            zdim=z_dim_used,
+            pca_dim=pca_dim,
             noreg=True,
-            pca_dim_max=pca_dim,
+            z_dim_used=z_dim_used,
             percentile_reject=percentile_reject,
             num_points_per_dim=num_points_per_dim,
             tol=1e-4,
             max_iterations=1000,
+            online=True,
             batch_size_zs=batch_size_zs,
             batch_size_nodes=batch_size_nodes
         )
     logger.info("Deconvolution done, size = %s", density.shape)
     calibrate_density.plot_density(density)
     plt.savefig(str(plots_dir / "density.png"))
+    calibrate_density.plot_info(losses, gaps, plots_dir)
     plt.close()
 
     # TODO: for plotting stopping criteria curves, etc
@@ -157,6 +166,7 @@ def main():
             z_dim_used=args.z_dim_used,
             percentile_reject=args.percentile_reject,
             num_points_per_dim=args.num_points_per_dim,
+            online=args.online,
             batch_size_zs=args.batch_size_zs,
             batch_size_nodes=args.batch_size_nodes
         )
