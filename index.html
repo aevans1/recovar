@@ -778,8 +778,6 @@
       
         
       
-        
-      
     
     
     
@@ -840,34 +838,6 @@
     
   
     Web GUI
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="guide/tutorial/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Tutorial
   
 
     
@@ -1898,12 +1868,12 @@
 <hr />
 <h2 id="why-recovar">Why RECOVAR?<a class="headerlink" href="#why-recovar" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Highest resolution</strong> on <a href="https://cryobench.cs.princeton.edu">CryoBench</a> across multiple datasets</li>
-<li><strong>Conformational density</strong> and free-energy landscape estimation</li>
+<li><strong>Highest resolution</strong> on <a href="https://cryobench.cs.princeton.edu">CryoBench</a></li>
+<li><strong>Conformational density</strong> estimation in latent space</li>
 <li><strong>Cryo-ET support</strong> for tilt-series heterogeneity analysis</li>
 <li><strong>Web GUI</strong> with interactive latent-space exploration and sub-particle selection</li>
 <li><strong>Direct input</strong> from RELION (<code>.star</code>) and cryoSPARC (<code>.cs</code>) -- no format conversion</li>
-<li><strong>No hallucinations</strong> -- kernel regression produces transparent, verifiable volumes</li>
+<li><strong>No generative model</strong> -- volumes come from kernel regression on your particles, not a neural network</li>
 </ul>
 <div class="admonition info">
 <p class="admonition-title">What you need before starting</p>
@@ -1911,12 +1881,15 @@
 <ol>
 <li>A particle stack with poses and CTF — a RELION <code>.star</code> file or cryoSPARC <code>.cs</code> file</li>
 <li>A solvent mask (<code>.mrc</code>) — or let RECOVAR generate one automatically</li>
-<li>An NVIDIA GPU (any Volta or newer — V100, RTX 20/30/40-series, A100, H100)</li>
+<li>An NVIDIA GPU, Volta or newer (V100, RTX 20/30/40-series, A100, H100) — 16+ GB of VRAM is recommended, though smaller cards work with <code>--downsample</code> and <code>--lazy</code></li>
 </ol>
 <p>RECOVAR outputs: mean reconstruction, variance maps, eigenvolumes, latent coordinates, k-means cluster volumes, UMAP embeddings, and trajectories — all exportable back to RELION/cryoSPARC.</p>
 </div>
 <hr />
 <h2 id="example-output">Example output<a class="headerlink" href="#example-output" title="Permanent link">&para;</a></h2>
+<p>In the Web GUI you can color particles by cluster, lasso a subset, and generate a volume at any point with a click:</p>
+<p><img alt="Interactive latent-space explorer in the Web GUI" src="_static/gui/16_latent_explorer.png" /></p>
+<p>RECOVAR also writes diagnostic plots and volumes:</p>
 <div class="example-outputs">
 <table>
 <thead>
@@ -1933,11 +1906,11 @@
 </tbody>
 </table>
 </div>
-<p><em>Inspect results directly in the browser -- 3D volume viewer with adjustable isosurface threshold:</em></p>
+<p>Inspect any volume in the browser, with an adjustable isosurface threshold:</p>
 <p><img alt="3D volume viewer in the GUI" src="_static/gui/homepage_volume_viewer.png" /></p>
 <hr />
 <h2 id="typical-workflow">Typical workflow<a class="headerlink" href="#typical-workflow" title="Permanent link">&para;</a></h2>
-<p>The easiest way to use RECOVAR is through the <a href="guide/gui/">Web GUI</a> -- launch it with <code>recovar gui</code>, then create jobs, explore the latent space, and generate volumes all from your browser.</p>
+<p>Launch the <a href="guide/gui/">Web GUI</a> with <code>recovar gui</code> to create jobs, explore the latent space, and generate volumes in the browser.</p>
 <p>Or use the command line:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># 1. Run the pipeline (~10 min for a small dataset)</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>recovar<span class="w"> </span>pipeline<span class="w"> </span>particles.star<span class="w"> </span>-o<span class="w"> </span>output<span class="w"> </span>--mask<span class="w"> </span>mask.mrc

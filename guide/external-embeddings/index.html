@@ -672,8 +672,6 @@
       
         
       
-        
-      
     
     
     
@@ -737,34 +735,6 @@
     
   
     Web GUI
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../tutorial/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Tutorial
   
 
     
@@ -1849,12 +1819,7 @@
 
 
 <h1 id="external-embeddings">External Embeddings<a class="headerlink" href="#external-embeddings" title="Permanent link">&para;</a></h1>
-<p>You can use RECOVAR's volume generation (kernel regression) with latent spaces produced by other heterogeneity methods. This is useful for:</p>
-<ul>
-<li>Improving resolution of cryoDRGN or other method's reconstructions</li>
-<li>Validating results from neural network methods (RECOVAR's kernel regression is transparent and produces no hallucinations)</li>
-<li>Combining strengths of different methods</li>
-</ul>
+<p>You can generate volumes with RECOVAR's kernel regression from a latent space produced by another method (e.g. cryoDRGN). Pass the external embedding and a set of target coordinates, and RECOVAR reconstructs the volumes at those points.</p>
 <h2 id="usage">Usage<a class="headerlink" href="#usage" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>recovar<span class="w"> </span>reconstruct_from_external_embedding<span class="w"> </span>particles.star<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">    </span>--poses<span class="w"> </span>poses.pkl<span class="w"> </span>--ctf<span class="w"> </span>ctf.pkl<span class="w"> </span><span class="se">\</span>
@@ -1924,6 +1889,10 @@
 </tr>
 </tbody>
 </table>
+<div class="admonition note">
+<p class="admonition-title">Poses and CTF must be <code>.pkl</code> files</p>
+<p>Unlike <code>recovar pipeline</code>, this command does <strong>not</strong> auto-extract poses and CTF from a <code>.star</code>/<code>.cs</code> file. Even when <code>particles</code> is a <code>.star</code> or <code>.cs</code>, you must pass <code>--poses</code> and <code>--ctf</code> as separate <code>.pkl</code> files (for example, the <code>poses.pkl</code> / <code>ctf.pkl</code> that cryoDRGN writes during preprocessing).</p>
+</div>
 <h2 id="example-using-cryodrgn-embeddings">Example: using cryoDRGN embeddings<a class="headerlink" href="#example-using-cryodrgn-embeddings" title="Permanent link">&para;</a></h2>
 <ol>
 <li>Run cryoDRGN to get latent coordinates (<code>z.pkl</code>)</li>
@@ -1936,7 +1905,7 @@
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span>--embedding<span class="w"> </span>z.24.pkl<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">    </span>--target<span class="w"> </span>coords.txt<span class="w"> </span>--Bfactor<span class="o">=</span><span class="m">50</span>
 </code></pre></div>
-<p>The resulting volumes use RECOVAR's transparent kernel regression for volume generation but follow cryoDRGN's latent space structure.</p>
+<p>The volumes are reconstructed by kernel regression at cryoDRGN's latent coordinates.</p>
 
 
 
