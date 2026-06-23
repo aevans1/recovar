@@ -5,7 +5,6 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from recovar import utils
 from recovar.heterogeneity import calibrate_density
 from recovar.output import output
 
@@ -13,7 +12,9 @@ logger = logging.getLogger(__name__)
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Estimate conformational density from recovar results, trying a different technique")
+    parser = argparse.ArgumentParser(
+        description="Estimate conformational density from recovar results, trying a different technique"
+    )
     parser.add_argument(
         "recovar_result_dir", type=str, help="Directory containing recovar results provided to pipeline.py"
     )
@@ -24,6 +25,7 @@ def parse_args():
         help="Directory to save the density estimation results. Default = recovar_result_dir/density/",
     )
     from recovar.utils.parser_args import add_output_name_arg, add_project_arg
+
     add_project_arg(parser)
     add_output_name_arg(parser)
     parser.add_argument(
@@ -60,7 +62,7 @@ def parse_args():
         "--online",
         type=bool,
         default=True,
-        help="If true, recomputes likelihood at each gradient iteration, to save memory. Use if large number of images or nodes."
+        help="If true, recomputes likelihood at each gradient iteration, to save memory. Use if large number of images or nodes.",
     )
     parser.add_argument(
         "--batch_size_zs",
@@ -87,9 +89,8 @@ def estimate_conformational_density_alt(
     num_points_per_dim=None,
     online=True,
     batch_size_zs=10000,
-    batch_size_nodes=10000
+    batch_size_nodes=10000,
 ):
-
     recovar_result_dir = Path(recovar_result_dir).expanduser().resolve()
     if not recovar_result_dir.exists():
         raise FileNotFoundError(f"recovar_result_dir {recovar_result_dir} does not exist")
@@ -104,9 +105,13 @@ def estimate_conformational_density_alt(
     if pca_dim > z_dim_used:
         raise ValueError(f"pca_dim is {pca_dim}, should be less than or equal to z_dim_used {z_dim_used}")
     if pca_dim > 3:
-        logger.info(f"pca_dim is {pca_dim}, should be less than or equal to 4. It is set larger than 3, and it will take very long for 4 dimensions, at it's current implementation.")
+        logger.info(
+            f"pca_dim is {pca_dim}, should be less than or equal to 4. It is set larger than 3, and it will take very long for 4 dimensions, at it's current implementation."
+        )
 
-    output_dir = Path(output_dir).expanduser().resolve() if output_dir is not None else recovar_result_dir / "density_alt"
+    output_dir = (
+        Path(output_dir).expanduser().resolve() if output_dir is not None else recovar_result_dir / "density_alt"
+    )
     output.mkdir_safe(str(output_dir))
     plots_dir = output_dir / "plots"
     data_dir = output_dir / "data"
@@ -114,42 +119,22 @@ def estimate_conformational_density_alt(
     output.mkdir_safe(str(data_dir))
 
     density, losses, gaps = calibrate_density.multiplicative_gradient(
-            pipeline_output,
-            pca_dim=pca_dim,
-            noreg=True,
-            z_dim_used=z_dim_used,
-            percentile_reject=percentile_reject,
-            num_points_per_dim=num_points_per_dim,
-            tol=1e-4,
-            max_iterations=1000,
-            online=True,
-            batch_size_zs=batch_size_zs,
-            batch_size_nodes=batch_size_nodes
-        )
+        pipeline_output,
+        pca_dim=pca_dim,
+        noreg=True,
+        z_dim_used=z_dim_used,
+        percentile_reject=percentile_reject,
+        num_points_per_dim=num_points_per_dim,
+        tol=1e-4,
+        max_iterations=1000,
+        online=True,
+        batch_size_zs=batch_size_zs,
+        batch_size_nodes=batch_size_nodes,
+    )
     logger.info("Deconvolution done, size = %s", density.shape)
-    calibrate_density.plot_density(density)
-    plt.savefig(str(plots_dir / "density.png"))
-    calibrate_density.plot_info(losses, gaps, plots_dir)
+    calibrate_density.plot_density(density, plots_dir=plots_dir)
+    calibrate_density.plot_info(losses, gaps, plots_dir=plots_dir)
     plt.close()
-
-    # TODO: for plotting stopping criteria curves, etc
-    #plt.figure(figsize=(12, 10))
-    #for i, (alpha, c) in enumerate(zip(alphas, cost)):
-    #    plt.text(alpha, c, str(i), fontsize=18)
-    #plt.loglog(alphas, cost, "-o")
-    #plt.loglog(np.ones(2) * alphas[knee_idx], [min(cost), max(cost)], "--", color="black")
-    #plt.text(
-    #    alphas[knee_idx],
-    #    min(cost),
-    #    f"knee point: {alphas[knee_idx]:.2e}, idx={knee_idx}",
-    #    rotation=90,
-    #    verticalalignment="bottom",
-    #)
-    #plt.ylabel("Cost")
-    #plt.xlabel("Lambda (regularization parameter)")
-    #plt.gca().invert_xaxis()
-    #plt.savefig(str(plots_dir / "Lcurve.png"), transparent=True)
-    #plt.close()
 
 
 def main():
@@ -168,7 +153,7 @@ def main():
             num_points_per_dim=args.num_points_per_dim,
             online=args.online,
             batch_size_zs=args.batch_size_zs,
-            batch_size_nodes=args.batch_size_nodes
+            batch_size_nodes=args.batch_size_nodes,
         )
 
 

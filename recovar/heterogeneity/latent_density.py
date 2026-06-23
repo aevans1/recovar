@@ -68,7 +68,6 @@ def make_latent_space_grid_from_bounds(latent_space_bounds, num_points):
 
 # Computes density in pca_dim_max dimensions on grid
 def compute_latent_space_density(zs, cov_zs, pca_dim_max=4, num_points=50, density_option="kde", percentile=1):
-
     if density_option == "kde":
         return compute_latent_space_density_kde(
             zs, pca_dim_max=pca_dim_max, num_points=num_points, percentile=percentile
@@ -104,7 +103,6 @@ def compute_latent_space_density_at_pts(test_pts, zs, cov_zs):
 
 
 def compute_probs_in_batch(test_pts, zs, cov_zs):
-
     scale_zs = np.array(compute_det_cov_xs(cov_zs))
     summed_probs = jnp.zeros_like(test_pts[:, 0])
 
@@ -143,7 +141,6 @@ def compute_latent_space_density_on_curve(
     gauss_kde=None,
     normalize=True,
 ):
-
     if density_option == "kde" and gauss_kde is None:
         utils.logger.info("Computing Gaussian KDE with SIlverman bandwidth")
         gauss_kde = jax.scipy.stats.gaussian_kde(zs.T, "silverman")
@@ -264,6 +261,7 @@ def compute_latent_quadratic_forms_in_batch(test_pts, zs, cov_zs):
 
     return quads
 
+
 def compute_latent_log_likelihood_no_batch(test_pts, zs, cov_zs, det_cov_zs):
     """modified version of func compute_latent_log_likelihood, that takes det cov zs as input and assumes zs, cov_zs are batched beforehand"""
     if zs.shape[1] != test_pts.shape[1]:
@@ -274,11 +272,8 @@ def compute_latent_log_likelihood_no_batch(test_pts, zs, cov_zs, det_cov_zs):
         raise ValueError(f"test_pts must be 2D, got {test_pts.ndim}D")
     if cov_zs.ndim != zs.ndim + 1:
         raise ValueError(f"cov_zs.ndim ({cov_zs.ndim}) must be zs.ndim+1 ({zs.ndim + 1})")
-    
-    log_likelihood = 0.5 * (
-            compute_latent_quadratic_forms(test_pts.real, zs.real, cov_zs)
-            - det_cov_zs[..., None]
-        )
+
+    log_likelihood = 0.5 * (compute_latent_quadratic_forms(test_pts.real, zs.real, cov_zs) - det_cov_zs[..., None])
     return log_likelihood
 
 
@@ -297,19 +292,22 @@ def compute_latent_log_likelihood(test_pts, zs, cov_zs, batch_size=None):
 
     if batch_size is None:
         batch_size = utils.get_latent_density_batch_size(test_pts, zs.shape[-1], utils.get_gpu_memory_total())
-        #batch_size = zs.shape[0]
+        # batch_size = zs.shape[0]
     logger.info("batch size in latent computation: %s", batch_size)
     print("batch size in latent computation: %s", batch_size)
 
-    chunks = [] 
+    chunks = []
     for k in range(0, utils.get_number_of_index_batch(n_images, batch_size)):
         print(k)
         batch_st, batch_end = utils.get_batch_of_indices(n_images, batch_size, k)
-        chunks.append(0.5 * (
-            compute_latent_quadratic_forms(test_pts.real, zs[batch_st:batch_end].real, cov_zs[batch_st:batch_end])
-            - det_cov_zs[batch_st:batch_end][..., None]
-        ))
-    
+        chunks.append(
+            0.5
+            * (
+                compute_latent_quadratic_forms(test_pts.real, zs[batch_st:batch_end].real, cov_zs[batch_st:batch_end])
+                - det_cov_zs[batch_st:batch_end][..., None]
+            )
+        )
+
     return jnp.concatenate(chunks, axis=0)
 
 
@@ -332,7 +330,6 @@ def compute_det_cov_xs(cov_xs):
 
 
 def compute_latent_space_density_kde(zs, pca_dim_max=4, num_points=50, gauss_kde=None, percentile=1):
-
     if zs.shape[1] != pca_dim_max:
         zs = zs[:, :pca_dim_max]
 
