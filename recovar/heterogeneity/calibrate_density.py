@@ -1,19 +1,16 @@
-import os
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"]= "false"
-
 import jax
 import jax.numpy as jnp
 import numpy as np
 import equinox as eqx
 import matplotlib.pyplot as plt
 import logging
-from pathlib import Path
 
 from recovar.heterogeneity import latent_density as ld
-from recovar.output import output 
 
 logger = logging.getLogger(__name__)
 
+
+### Methods for "regular" multiplactive gradient #########################
 @jax.jit
 def normalize_log_likeli_to_likeli(log_likelihood):
     """
@@ -38,7 +35,82 @@ def normalize_log_likeli_to_likeli(log_likelihood):
     return likelihood
 
 
-# NOTE: this multipyling by exp(c) could be unstable, need to refactor below to be in log space, and also avoid taking log pi, by using some weighted log sum exp functions
+@jax.jit
+def compute_grad_and_loss(weights, likelihood):
+    """ 
+    This computes the "probabilistic model" for the data prob density with weights w
+    And then computes log marginal likelihood, it's gradient of it's log with respect to the w's,
+    and the negative log marginal likelihood (the loss)
+
+    Parameters
+    ----------
+    weights : jax.Array
+        weights of the nodes
+    likelihood : jax.Array
+        likelihood of data-point i from node j.
+        must be of shape (num_data x num_nodes) 
+
+    Returns
+    -------
+    (grad) gradient of log marginal likelihood: jax.Array
+    (loss) -1* log marginal likelihood: float
+    """
+
+    model = likelihood @ weights
+    loss = -jnp.mean(jnp.log(model))
+    grad = jnp.mean(likelihood/model[:, jnp.newaxis], axis=0)
+    return grad, loss
+
+
+@jax.jit
+def update_weights(weights, grad):
+    """
+    Updates weights according to multiplicative gradient algorithm.
+    NOTE: this update is positive and sums to 1 without normalization.
+
+    Parameters
+    ----------
+    weights : jax.Array
+        weights of the nodes
+    grad : jax.Array
+        gradient of weights, same shape as weights
+
+    Returns
+    -------
+    updated weights: jax.Array  
+    """
+    return weights*grad
+
+
+@jax.jit
+def scaled_gap(grad, weights, scale):
+    """
+    Originally, find maximum index of gradient vec, only at nonzero indices of weights, and rescale.
+    Instead, using a more stable criteria here (first is commented out).
+    This gap is a proxy for convergence.
+
+    Parameters
+    ----------
+    grad : jax.Array
+        gradient of weights, same shape as weights
+    weights : jax.Array
+        weights of the nodes
+    scale : float
+        scaling factor, so that the gap at initial iterate is 1. 
+
+    Returns
+    -------
+    scaled gap: float
+    """
+    
+    #NOTE: the max grad seems very unstable for these batched computations, more reason to use a different criteria, like the weighted square norm below
+    #grad = jnp.where(weights > 0, grad, 0)
+    #return (jnp.amax(grad) - 1) / scale
+    return jnp.sum(weights*(grad - 1)**2) / scale
+
+### Methods for "online" multiplactive gradient ###############################
+
+# TODO: this multipyling by exp(c) could be unstable, need to refactor below to be in log space, and also avoid taking log pi, by using some weighted log sum exp functions
 # The exp(c) needs to be there right now because, on a batch of grid points, this constant won't cancel with the denominator (computed over the full set of grid points)
 @eqx.filter_jit
 def custom_exp_normalize(arr, axis): 
@@ -98,32 +170,6 @@ def compute_grad_and_loss_image_batch(weights, zs_batch, cov_zs_batch, det_cov_z
     return grad_batch, denominator.sum()
 
 
-@jax.jit
-def compute_grad(weights, likelihood):
-    """ 
-    This computes the "probabilistic model" for the data prob density with weights w
-    - sum_j p(y_i |x_j) w_j 
-    And then computes the gradient of (1/num_data)*sum_i log (sum_j p(y_i|x_j) w_j):
-    - (1/num_data)*sum_i ((p(y_i|x_j) / sum_k p(y_i | x_k) w_j))
-
-    Parameters
-    ----------
-    weights : jax.Array
-        weights of the nodes
-    likelihood : jax.Array
-        likelihood of data-point i from node j.
-        must be of shape (num_data x num_nodes) 
-
-    Returns
-    -------
-    gradient of log marginal likelihood: jax.Array
-    """
-
-    model = likelihood @ weights
-    grad = jnp.mean(likelihood/model[:, jnp.newaxis], axis=0)
-    return grad
-
-
 def compute_online_grad_and_loss(weights, zs, cov_zs, det_cov_zs, zs_grid, batch_size_zs=1000, batch_size_nodes=1000):
     """Gradient and loss computation, batched over zs (embedded images), and batched over zs_grid (latent volumes/confs). 
     For the batching, a log likelihood matrix cannot be pre-computed, its pre-computed at iteration.
@@ -153,56 +199,10 @@ def compute_online_grad_and_loss(weights, zs, cov_zs, det_cov_zs, zs_grid, batch
         det_cov_zs_chunk =  det_cov_zs[num_full_chunks*batch_size_zs:]
         val = compute_grad_and_loss_image_batch(weights, zs_chunk, cov_zs_chunk, det_cov_zs_chunk, zs_grid, batch_size=batch_size_nodes)
         grad = grad_accum(grad, val, 1/zs.shape[0])
-        loss += -jnp.log(loss_val)
+        loss += -(1/num_data)*jnp.log(loss_val)
 
     return grad, loss
 
-
-@jax.jit
-def update_weights(weights, grad):
-    """
-    Updates weights according to multiplicative gradient algorithm.
-    NOTE: this update is positive and sums to 1 without normalization.
-
-    Parameters
-    ----------
-    weights : jax.Array
-        weights of the nodes
-    grad : jax.Array
-        gradient of weights, same shape as weights
-
-    Returns
-    -------
-    updated weights: jax.Array  
-    """
-    return weights*grad
-
-
-@jax.jit
-def scaled_gap(grad, weights, scale):
-    """
-    Originally, find maximum index of gradient vec, only at nonzero indices of weights, and rescale.
-    Instead, using a more stable criteria here (first is commented out).
-    This gap is a proxy for convergence.
-
-    Parameters
-    ----------
-    grad : jax.Array
-        gradient of weights, same shape as weights
-    weights : jax.Array
-        weights of the nodes
-    scale : float
-        scaling factor, so that the gap at initial iterate is 1. 
-
-    Returns
-    -------
-    scaled gap: float
-    """
-    
-    #NOTE: the max grad seems very unstable for these batched computations, more reason to use a different criteria, like the weighted square norm below
-    #grad = jnp.where(weights > 0, grad, 0)
-    #return (jnp.amax(grad) - 1) / scale
-    return jnp.sum(weights*(grad - 1)**2) / scale
 
 
 # TODO: readjust this to return the loss per iteration and the gradient gap per iteration
@@ -270,7 +270,9 @@ def multiplicative_gradient(
         ## Compute full likelihood matrix, re-use in non-online (full) gradient updates
         log_likelihood = -1*ld.compute_latent_log_likelihood(nodes, zs, cov_zs, det_cov_zs).astype(jnp.float32)
         likelihood = normalize_log_likeli_to_likeli(log_likelihood)
-        gap_scale = scaled_gap(compute_grad(weights, likelihood), weights, scale=1.0)
+        grad_init, = compute_grad_and_loss(weights, likelihood)
+        gap_scale = scaled_gap(grad_init, weights, scale=1.0)
+    
     reached_gap = False
 
     losses = []
@@ -281,8 +283,7 @@ def multiplicative_gradient(
         if online:
             grad, loss = compute_online_grad_and_loss(weights, zs, cov_zs, det_cov_zs, nodes, batch_size_zs=batch_size_zs, batch_size_nodes=batch_size_nodes)
         else:
-            grad = compute_grad(weights, likelihood)
-            # TODO: put in loss thing 
+            grad, loss = compute_grad_and_loss(weights, likelihood)
         losses.append(loss)
 
         ## Check stopping criterions
@@ -312,7 +313,7 @@ def multiplicative_gradient(
     return weights, losses, gaps
 
 
-def plot_info(losses, gaps, save_dir):
+def plot_info(losses, gaps, plots_dir=None):
     num_iterations = len(losses)
     iterations = jnp.arange(num_iterations)
     
@@ -321,16 +322,19 @@ def plot_info(losses, gaps, save_dir):
     plt.xlabel("iterations")
     plt.ylabel("losses")
     plt.tight_layout()
-    plt.savefig(str(save_dir / "losses.png"))
+    if plots_dir is not None:
+        plt.savefig(str(plots_dir / "losses.png"))
 
     plt.figure()
     plt.semilogy(iterations, gaps)
     plt.xlabel("iterations")
     plt.ylabel("gaps")
     plt.tight_layout()
-    plt.savefig(str(save_dir / "gaps.png"))
+    if plots_dir is not None:
+        plt.savefig(str(plots_dir / "gaps.png"))
 
-def plot_density(density, function=None, cmap="inferno"):
+
+def plot_density(density, function=None, cmap="inferno", plots_dir=None):
     from recovar.output.output import sum_over_other
 
     def half_slice_other(density, axes):
@@ -383,59 +387,6 @@ def plot_density(density, function=None, cmap="inferno"):
             axs[col].set_yticklabels([])
 
     plt.subplots_adjust(wspace=0.05)
+    if plots_dir is not None:
+        plt.savefig(str(plots_dir / "density.png"))
     return fig, axs
-
-
-def main():
-
-    # Set up directories (not needed here but can be used if wanting saved figs)
-    main_dir = "."
-    fig_dir = f"{main_dir}/figures/"
-    data_dir = f"{main_dir}/data/"
-
-    # Set dir with all zs, cov_zs
-    recovar_result_dir="/mnt/home/levans/ceph/recovar_testing/bad_histogram_igg/_given_mask_with_correct_contrast"
-
-    # Set params for algorithm
-    z_dim_used=4
-    batch_size_zs = 1000
-    batch_size_nodes = 40000
-
-    recovar_result_dir = Path(recovar_result_dir).expanduser().resolve()
-    if not recovar_result_dir.exists():
-        raise FileNotFoundError(f"recovar_result_dir {recovar_result_dir} does not exist")
-
-    pipeline_output = output.PipelineOutput(str(recovar_result_dir))
-
-    #weights = multiplicative_gradient(pipeline_output,
-    #                                         z_dim_used=z_dim_used,
-    #                                         noreg=True,
-    #                                         percentile_reject=10,
-    #                                         num_points_per_dim=20,
-    #                                         tol=1e-6,
-    #                                         max_iterations=10,
-    #                                         online=True,
-    #                                         batch_size_zs=batch_size_zs,
-    #                                         batch_size_nodes=batch_size_nodes
-    #)
-    #jnp.save(f"weights_online_pca_dim_{pca_dim}.npy", weights) 
-    weights = jnp.load(f"weights_online_pca_dim_{4}.npy") 
-    plot_density(weights) 
-
-    #if pca_dim == 2: 
-    #    plt.figure()
-    #    plt.imshow(weights.T, cmap="magma")
-    #    plt.savefig(f"plot_fig_weights_online_pca_dim_{pca_dim}.png",dpi=300) 
-    #    plt.figure()
-    #    plt.imshow(jnp.log(weights).reshape(200,200).T, cmap="magma")
-    #    plt.colorbar()
-
-    #if pca_dim == 4: 
-    #    plot_density(weights) 
-    #    plt.savefig("plot_density_recovar_style_pca_dim_{pca_dim}.png",dpi=300) 
-    
-    plt.show()
-
-
-if __name__ == "__main__":
-    main()
