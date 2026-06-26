@@ -50,9 +50,11 @@ def get_raw_density(
     zs = pipeline_output.get(coords_entry)[zdim]
     cov_zs = pipeline_output.get(precision_entry)[zdim]
 
+    # Luke comment: should this outlier removing, via good_zs, take place in zdim, or pca_dim? I'm changing from zdim to pca_dim in this commit, because this would be an outlier removal that would more directly affect stability of deconvolution, as its looking at unstable covariances determined by the same dims as used in deconvolution. This line below is same as before but moved earlier in script, before outlier removal.
+    zdim = pca_dim_max
+
     cov_zs_norm = np.linalg.norm(cov_zs, axis=(-1, -2), ord=2)
     good_zs = cov_zs_norm > np.percentile(cov_zs_norm, percentile_reject)
-    zdim = pca_dim_max
     zs = zs[good_zs][:, :zdim]
     cov_zs = cov_zs[good_zs][:, :zdim, :zdim]
     gauss_kde = jax.scipy.stats.gaussian_kde(zs.T, "silverman")
