@@ -53,30 +53,47 @@ def parse_args():
         help="Number of discretization points in each dimension for the grid density estimation. Default = 50 for dim >3, 100 for dim = 3, 200 for dim = 2",
     )
     parser.add_argument(
-        "--percentile_bound",
+        "--tol",
+        type=float,
+        default=1e-4,
+        help="Sets stopping tolerance for density estimation."   
+    )
+    parser.add_argument(
+        "--max_iterations",
         type=int,
-        default=1,
-        help="Rejects zs with coordinates above this bound for deciding the bounds of the grid (default 1 =1%%)",
+        default=1000,
+        help="Sets max number of iterations for density estimation."   
     )
     parser.add_argument(
         "--online",
-        type=bool,
-        default=True,
-        help="If true, recomputes likelihood at each gradient iteration, to save memory. Use if large number of images or nodes.",
+        action="store_true",
+        default=False,
+        help="If passed, recomputes likelihood at each gradient iteration, to save memory. Use if large number of images or nodes.",
+    )
+    parser.add_argument(
+        "--weights_frequency",
+        type=int,
+        default=0,
+        help="Sets frequency that intermediate weight outputs are saved in density estimation. At default of 0, no intermediates are saved."   
+    )
+    parser.add_argument(
+        "--diagnostic",
+        action="store_true",
+        default=False,
+        help="If true, density estimation runs to max iterations.",
     )
     parser.add_argument(
         "--batch_size_zs",
         type=int,
-        default=10000,
-        help="Batch size of embedded images (zs) to use in online density estimation algorithm (default 10000)",
+        default=None,
+        help="Batch size of embedded images (zs) to use in online density estimation algorithm.",
     )
     parser.add_argument(
         "--batch_size_nodes",
         type=int,
-        default=10000,
-        help="Batch size of nodes (grid points) to use in online density estimation algorithm (default 10000)",
+        default=None,
+        help="Batch size of nodes (grid points) to use in online density estimation algorithm.",
     )
-
     return parser.parse_args()
 
 
@@ -87,10 +104,14 @@ def estimate_conformational_density_alt(
     z_dim_used=4,
     percentile_reject=10,
     num_points_per_dim=None,
+    tol=1e-4,
+    max_iterations=1000,
     online=True,
+    weights_frequency=0,
+    diagnostic=False,
     batch_size_zs=10000,
-    batch_size_nodes=10000,
 ):
+    logger.info(f"online? {online}") 
     recovar_result_dir = Path(recovar_result_dir).expanduser().resolve()
     if not recovar_result_dir.exists():
         raise FileNotFoundError(f"recovar_result_dir {recovar_result_dir} does not exist")
@@ -118,21 +139,28 @@ def estimate_conformational_density_alt(
     output.mkdir_safe(str(plots_dir))
     output.mkdir_safe(str(data_dir))
 
-    density, losses, gaps = calibrate_density.multiplicative_gradient(
+    density, info = calibrate_density.multiplicative_gradient(
         pipeline_output,
         pca_dim=pca_dim,
         noreg=True,
         z_dim_used=z_dim_used,
         percentile_reject=percentile_reject,
         num_points_per_dim=num_points_per_dim,
-        tol=1e-4,
-        max_iterations=1000,
-        online=True,
+        tol=tol,
+        max_iterations=max_iterations,
+        online=online,
+        weights_frequency=weights_frequency,
+        diagnostic=diagnostic,
         batch_size_zs=batch_size_zs,
-        batch_size_nodes=batch_size_nodes,
     )
+    losses = info["losses"]
+    gaps = info["gaps"]
+    weights_all = info["weights_all"]
+    idx_weights = info["idx_weights"]
+    row_labels = [f"iteration {idx} " for idx in idx_weights]
     logger.info("Deconvolution done, size = %s", density.shape)
     calibrate_density.plot_density(density, plots_dir=plots_dir)
+    calibrate_density.plot_density(weights_all, plots_dir=plots_dir, row_labels=row_labels)
     calibrate_density.plot_info(losses, gaps, plots_dir=plots_dir)
     plt.close()
 
@@ -151,9 +179,12 @@ def main():
             z_dim_used=args.z_dim_used,
             percentile_reject=args.percentile_reject,
             num_points_per_dim=args.num_points_per_dim,
+            tol=args.tol,
+            max_iterations=args.max_iterations,
             online=args.online,
+            weights_frequency=args.weights_frequency,
+            diagnostic=args.diagnostic,
             batch_size_zs=args.batch_size_zs,
-            batch_size_nodes=args.batch_size_nodes,
         )
 
 

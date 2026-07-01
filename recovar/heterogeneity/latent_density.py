@@ -294,11 +294,9 @@ def compute_latent_log_likelihood(test_pts, zs, cov_zs, batch_size=None):
         batch_size = utils.get_latent_density_batch_size(test_pts, zs.shape[-1], utils.get_gpu_memory_total())
         # batch_size = zs.shape[0]
     logger.info("batch size in latent computation: %s", batch_size)
-    print("batch size in latent computation: %s", batch_size)
 
     chunks = []
     for k in range(0, utils.get_number_of_index_batch(n_images, batch_size)):
-        print(k)
         batch_st, batch_end = utils.get_batch_of_indices(n_images, batch_size, k)
         chunks.append(
             0.5
