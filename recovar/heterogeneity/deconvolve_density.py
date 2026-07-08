@@ -299,8 +299,8 @@ def plot_density_centers(density, centers):
     is_first = True
 
     def plot_dens(density, title, n_plot):
-        if density.ndim == 2:
-            axs[n_plot, k].imshow(density)
+        if density.ndim == 1:
+            axs[n_plot, 0].imshow(density)
         else:
             for k in range(1, density.ndim):
                 if k == 1:
