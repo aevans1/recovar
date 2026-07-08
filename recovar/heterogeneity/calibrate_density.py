@@ -200,18 +200,14 @@ def multiplicative_gradient(
     cov_zs = cov_zs[:, :pca_dim, :pca_dim]
 
     ## Throwing away unstable covariances
-    # TODO: should this outlier removing take place in z_dim_used, or pca_dim? For now, in pca_dim
     cov_zs_norm = jnp.linalg.norm(cov_zs, axis=(-1, -2), ord=2)
     good_zs = cov_zs_norm > jnp.percentile(cov_zs_norm, q=percentile_reject)
     zs = zs[good_zs]
     cov_zs = cov_zs[good_zs]
-    #det_cov_zs = ld.compute_log_det_cov(cov_zs).astype(jnp.float32)
 
     # NOTE: uncomment this for trying out the scalar diagonal approx
     if ignore_cov_zs:
-        #cov_zs = jnp.tile(jnp.eye(2), (cov_zs.shape[0], 1, 1)).astype(jnp.float32)*jnp.mean(jnp.exp(det_cov_zs[:, None, None]))**(1/pca_dim)
         cov_zs = jnp.tile(jnp.mean(cov_zs, axis=0), (cov_zs.shape[0], 1, 1)).astype(jnp.float32)
-        #det_cov_zs = ld.compute_log_det_cov(cov_zs).astype(jnp.float32)
 
     ## Making a grid
     latent_space_bounds = ld.compute_latent_space_bounds(zs, percentile=1)
