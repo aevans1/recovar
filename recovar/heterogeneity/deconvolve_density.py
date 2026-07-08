@@ -299,7 +299,6 @@ def plot_density_centers(density, centers):
     is_first = True
 
     def plot_dens(density, title, n_plot):
-
         if density.ndim == 2:
             axs[n_plot, k].imshow(density)
         else:
@@ -391,8 +390,8 @@ def find_local_maxs_of_density(density_deconv, latent_space_bounds, percent_top=
     n_top_points = int(percent_top / 100 * np.prod(density_deconv.shape))
     large_dens_indices = (np.array(large_dens_indices_raveled)[:, -n_top_points:]).T
 
-    from sklearn.cluster import KMeans, AgglomerativeClustering, HDBSCAN
     import matplotlib.pyplot as plt
+    from sklearn.cluster import HDBSCAN, AgglomerativeClustering, KMeans
     # clustering = KMeans(n_clusters=n_local_maxs,  n_init=10).fit(X)
 
     if n_local_maxs >= 1:
