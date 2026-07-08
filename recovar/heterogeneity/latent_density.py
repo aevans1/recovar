@@ -262,6 +262,88 @@ def compute_latent_quadratic_forms_in_batch(test_pts, zs, cov_zs):
     return quads
 
 
+##### Luke's stop-gap new functions, these should be incorporated as options to existing functions here, in the future
+def compute_latent_log_likelihood_no_batch_no_dets(test_pts, zs, cov_zs):
+    """modified version of func compute_latent_log_likelihood, that assumes zs, cov_zs are batched beforehand, and ignores determinant normalization"""
+    if zs.shape[1] != test_pts.shape[1]:
+        raise ValueError(f"zs dim ({zs.shape[1]}) != test_pts dim ({test_pts.shape[1]})")
+    if zs.shape[1] != cov_zs.shape[1]:
+        raise ValueError(f"zs dim ({zs.shape[1]}) != cov_zs dim ({cov_zs.shape[1]})")
+    if test_pts.ndim != 2:
+        raise ValueError(f"test_pts must be 2D, got {test_pts.ndim}D")
+    if cov_zs.ndim != zs.ndim + 1:
+        raise ValueError(f"cov_zs.ndim ({cov_zs.ndim}) must be zs.ndim+1 ({zs.ndim + 1})")
+
+    log_likelihood = 0.5 * (compute_latent_quadratic_forms(test_pts.real, zs.real, cov_zs))
+    return log_likelihood
+
+
+def compute_latent_log_likelihood_no_dets(test_pts, zs, cov_zs, batch_size=None):
+    """modified version of func compute_latent_log_likelihood, that ignores determinant normalization"""
+    if zs.shape[1] != test_pts.shape[1]:
+        raise ValueError(f"zs dim ({zs.shape[1]}) != test_pts dim ({test_pts.shape[1]})")
+    if zs.shape[1] != cov_zs.shape[1]:
+        raise ValueError(f"zs dim ({zs.shape[1]}) != cov_zs dim ({cov_zs.shape[1]})")
+    if test_pts.ndim != 2:
+        raise ValueError(f"test_pts must be 2D, got {test_pts.ndim}D")
+    if cov_zs.ndim != zs.ndim + 1:
+        raise ValueError(f"cov_zs.ndim ({cov_zs.ndim}) must be zs.ndim+1 ({zs.ndim + 1})")
+
+    det_cov_zs = compute_log_det_cov(cov_zs)
+    n_images = zs.shape[0]
+
+    if batch_size is None:
+        batch_size = utils.get_latent_density_batch_size(test_pts, zs.shape[-1], utils.get_gpu_memory_total())
+        # batch_size = zs.shape[0]
+    logger.info("batch size in latent computation: %s", batch_size)
+
+    chunks = []
+    for k in range(0, utils.get_number_of_index_batch(n_images, batch_size)):
+        batch_st, batch_end = utils.get_batch_of_indices(n_images, batch_size, k)
+        chunks.append(
+            0.5
+            * (
+                compute_latent_quadratic_forms(test_pts.real, zs[batch_st:batch_end].real, cov_zs[batch_st:batch_end])
+            )
+        )
+
+    return jnp.concatenate(chunks, axis=0)
+#####  END Luke's stop-gap new functions
+
+def compute_latent_log_likelihood(test_pts, zs, cov_zs, batch_size=None):
+    if zs.shape[1] != test_pts.shape[1]:
+        raise ValueError(f"zs dim ({zs.shape[1]}) != test_pts dim ({test_pts.shape[1]})")
+    if zs.shape[1] != cov_zs.shape[1]:
+        raise ValueError(f"zs dim ({zs.shape[1]}) != cov_zs dim ({cov_zs.shape[1]})")
+    if test_pts.ndim != 2:
+        raise ValueError(f"test_pts must be 2D, got {test_pts.ndim}D")
+    if cov_zs.ndim != zs.ndim + 1:
+        raise ValueError(f"cov_zs.ndim ({cov_zs.ndim}) must be zs.ndim+1 ({zs.ndim + 1})")
+
+    det_cov_zs = compute_log_det_cov(cov_zs)
+    n_images = zs.shape[0]
+
+    if batch_size is None:
+        batch_size = utils.get_latent_density_batch_size(test_pts, zs.shape[-1], utils.get_gpu_memory_total())
+        # batch_size = zs.shape[0]
+    logger.info("batch size in latent computation: %s", batch_size)
+
+    chunks = []
+    for k in range(0, utils.get_number_of_index_batch(n_images, batch_size)):
+        batch_st, batch_end = utils.get_batch_of_indices(n_images, batch_size, k)
+        chunks.append(
+            0.5
+            * (
+                compute_latent_quadratic_forms(test_pts.real, zs[batch_st:batch_end].real, cov_zs[batch_st:batch_end])
+                - det_cov_zs[batch_st:batch_end][..., None]
+            )
+        )
+
+    return jnp.concatenate(chunks, axis=0)
+
+
+
+
 def compute_latent_log_likelihood_no_batch(test_pts, zs, cov_zs, det_cov_zs):
     """modified version of func compute_latent_log_likelihood, that takes det cov zs as input and assumes zs, cov_zs are batched beforehand"""
     if zs.shape[1] != test_pts.shape[1]:

@@ -1,4 +1,5 @@
 import logging
+from functools import partial
 
 import equinox as eqx
 import jax
@@ -109,7 +110,6 @@ def scaled_gap(grad, weights, scale):
     # return (jnp.amax(grad) - 1) / scale
     return jnp.sum(weights * (grad - 1) ** 2) / scale
 
-
 ### Methods for "online" multiplicative gradient ###############################
 @eqx.filter_jit
 def custom_exp_normalize(arr, axis):
@@ -121,19 +121,20 @@ def custom_exp_normalize(arr, axis):
 def grad_accum(grad, val, c):
     return grad + c * val
 
-def compute_grad_and_loss_image_batch(weights, zs_batch, cov_zs_batch, det_cov_zs_batch, zs_grid, batch_size=1000):
+def compute_grad_and_loss_image_batch(weights, zs_batch, cov_zs_batch, zs_grid, batch_size=1000):
     
-    log_likelihood_batch = -1 * ld.compute_latent_log_likelihood_no_batch(
-        zs_grid, zs_batch, cov_zs_batch, det_cov_zs_batch
-    ).astype(jnp.float32)
+    log_likelihood_batch = -1 * ld.compute_latent_log_likelihood_no_batch_no_dets(
+        zs_grid, zs_batch, cov_zs_batch).astype(jnp.float32)
     exp_norm = custom_exp_normalize(log_likelihood_batch, axis=1)
+    
+    # NOTE: this is the line where could be replaced with a convolution-type multiplication  
     denominator = exp_norm @ weights
     grad_batch = jnp.sum(exp_norm / denominator[:, None], axis=0)
     return grad_batch, denominator.sum()
 
 
 @eqx.filter_jit
-def compute_online_grad_and_loss(weights, zs, cov_zs, det_cov_zs, zs_grid, batch_size_zs=1000):
+def compute_online_grad_and_loss(weights, zs, cov_zs, zs_grid, batch_size_zs=1000):
     """Gradient and loss computation, batched over zs (embedded images).
     For the batching, a log likelihood matrix cannot be pre-computed, its pre-computed at iteration.
     This is a naive first try at this, maybe there is a way of caching some of these to not re-use on subsequent evaluations....
@@ -149,9 +150,8 @@ def compute_online_grad_and_loss(weights, zs, cov_zs, det_cov_zs, zs_grid, batch
         [grad, loss] = grad_and_loss
         zs_chunk = jax.lax.dynamic_slice_in_dim(zs, idx * batch_size_zs, batch_size_zs, axis=0)
         cov_zs_chunk = jax.lax.dynamic_slice_in_dim(cov_zs, idx * batch_size_zs, batch_size_zs, axis=0)
-        det_cov_zs_chunk = jax.lax.dynamic_slice_in_dim(det_cov_zs, idx * batch_size_zs, batch_size_zs, axis=0)
         grad_val, loss_val = compute_grad_and_loss_image_batch(
-            weights, zs_chunk, cov_zs_chunk, det_cov_zs_chunk, zs_grid)
+            weights, zs_chunk, cov_zs_chunk, zs_grid)
         grad = grad_accum(grad, grad_val, 1 / zs.shape[0])
         loss += -(1 / num_data) * jnp.log(loss_val)
         return [grad, loss], None
@@ -164,9 +164,8 @@ def compute_online_grad_and_loss(weights, zs, cov_zs, det_cov_zs, zs_grid, batch
     if remainder > 0:
         zs_chunk = zs[num_full_chunks * batch_size_zs :]
         cov_zs_chunk = cov_zs[num_full_chunks * batch_size_zs :]
-        det_cov_zs_chunk = det_cov_zs[num_full_chunks * batch_size_zs :]
         grad_val, loss_val = compute_grad_and_loss_image_batch(
-            weights, zs_chunk, cov_zs_chunk, det_cov_zs_chunk, zs_grid)
+            weights, zs_chunk, cov_zs_chunk, zs_grid)
         grad = grad_accum(grad, grad_val, 1 / zs.shape[0])
         loss += -(1 / num_data) * jnp.log(loss_val)
 
@@ -206,13 +205,13 @@ def multiplicative_gradient(
     good_zs = cov_zs_norm > jnp.percentile(cov_zs_norm, q=percentile_reject)
     zs = zs[good_zs]
     cov_zs = cov_zs[good_zs]
-    det_cov_zs = ld.compute_log_det_cov(cov_zs).astype(jnp.float32)
+    #det_cov_zs = ld.compute_log_det_cov(cov_zs).astype(jnp.float32)
 
     # NOTE: uncomment this for trying out the scalar diagonal approx
     if ignore_cov_zs:
         #cov_zs = jnp.tile(jnp.eye(2), (cov_zs.shape[0], 1, 1)).astype(jnp.float32)*jnp.mean(jnp.exp(det_cov_zs[:, None, None]))**(1/pca_dim)
         cov_zs = jnp.tile(jnp.mean(cov_zs, axis=0), (cov_zs.shape[0], 1, 1)).astype(jnp.float32)
-        det_cov_zs = ld.compute_log_det_cov(cov_zs).astype(jnp.float32)
+        #det_cov_zs = ld.compute_log_det_cov(cov_zs).astype(jnp.float32)
 
     ## Making a grid
     latent_space_bounds = ld.compute_latent_space_bounds(zs, percentile=1)
@@ -229,6 +228,7 @@ def multiplicative_gradient(
     num_nodes = num_points_per_dim**pca_dim
 
     ## Initialize weights
+    # NOTE: this should possibly be reshaped to the original grids dimension to allow for convolution-type things
     weights = (1 / num_nodes) * jnp.ones(num_nodes).astype(jnp.float32)
 
 
@@ -252,7 +252,7 @@ def multiplicative_gradient(
         gap_scale = scaled_gap(grad_init, weights, scale=1.0)
     else:
         ## Compute full likelihood matrix, re-use in non-online (full) gradient updates
-        log_likelihood = -1 * ld.compute_latent_log_likelihood(nodes, zs, cov_zs).astype(jnp.float32)
+        log_likelihood = -1 * ld.compute_latent_log_likelihood_no_dets(nodes, zs, cov_zs).astype(jnp.float32)
         likelihood = normalize_log_likeli_to_likeli(log_likelihood)
         grad_init, loss_init  = compute_grad_and_loss(weights, likelihood)
         gap_scale = scaled_gap(grad_init, weights, scale=1.0)
@@ -300,16 +300,16 @@ def multiplicative_gradient(
 
     ## Return a grid of weights, and other info
     weights_final = weights.reshape((num_points_per_dim,) * pca_dim)
-    if pca_dim==2:
-        logger.info("temporary flipping of axis for compairsons in 2d...")
-        for i in range(len(info["weights_all"])):
-            info["weights_all"][i] = np.flip(info["weights_all"][i], axis=1)
     info["idx_final"] = k
     info["losses"] = jnp.stack(info["losses"])
     info["gaps"] = jnp.stack(info["gaps"])
     if weights_frequency > 0: 
         info["weights_all"] = jnp.stack(info["weights_all"])
         info["idx_weights"] = jnp.array(info["idx_weights"])
+    else:
+        info["weights_all"] = weights_final
+        info["idx_weights"] = jnp.array(info["idx_final"])
+
     if not reached_gap:
         logger.info("Terminated at max iters: ")
         logger.info("Returned weights & 'info[weights_gap']' are weights at max_iterations")
@@ -377,6 +377,7 @@ def plot_density(densities, function=None, cmap="inferno", plots_dir=None, row_l
     fig, axs = plt.subplots(n_rows, n_cols, figsize=(n_cols * 5, n_rows * 5), squeeze=False)
     for row, density in enumerate(densities):
         if density.ndim == 1:
+            density = np.flip(density.T, axis=1) # flip axis to match recovar behavior 
             axs[row, 0].plot(density)
             axs[row, 0].set_title("PC 0") if row == 0 else None
             axs[row, 0].set_xticklabels([])
@@ -389,6 +390,8 @@ def plot_density(densities, function=None, cmap="inferno", plots_dir=None, row_l
             col = 0
             for k in range(1, density.ndim):
                 to_plot = function(density, [0, k])
+                to_plot = np.flip(to_plot, axis=1) # flip axis to match recovar behavior 
+
                 if cbar_normalize:
                     axs[row, col].imshow(to_plot.T, cmap=cmap, origin="lower", vmin=vmin, vmax=vmax)
                 else:
