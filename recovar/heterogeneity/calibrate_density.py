@@ -248,7 +248,7 @@ def multiplicative_gradient(
             logger.info("number of nodes: %s", num_nodes)
 
         grad_init, loss_init = compute_online_grad_and_loss(
-            weights, zs, cov_zs, det_cov_zs, nodes, batch_size_zs=batch_size_zs)
+            weights, zs, cov_zs, nodes, batch_size_zs=batch_size_zs)
         gap_scale = scaled_gap(grad_init, weights, scale=1.0)
     else:
         ## Compute full likelihood matrix, re-use in non-online (full) gradient updates
@@ -269,7 +269,7 @@ def multiplicative_gradient(
         ## Update grad and loss
         if online:
             grad, loss = compute_online_grad_and_loss(
-                weights, zs, cov_zs, det_cov_zs, nodes, batch_size_zs=batch_size_zs)
+                weights, zs, cov_zs, nodes, batch_size_zs=batch_size_zs)
         else:
             grad, loss = compute_grad_and_loss(weights, likelihood)
         info["losses"].append(loss)
