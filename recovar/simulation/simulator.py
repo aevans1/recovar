@@ -176,6 +176,8 @@ def get_pose_ctf_generator(option):
         return noctf_random_sampling_scheme
     elif option == "dataset1":
         return get_params_generator(load_first_dataset_params)
+    elif option == "dataset2":
+        return get_params_generator(load_second_dataset_params)
     elif option == "nonuniform":
         f = lambda x, y=0, z=0: random_sampling_scheme(x, y, z, uniform=False)
         return f
