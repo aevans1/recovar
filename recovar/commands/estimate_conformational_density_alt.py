@@ -7,6 +7,7 @@ import numpy as np
 
 from recovar.heterogeneity import calibrate_density
 from recovar.output import output
+import recovar.utils as utils
 
 logger = logging.getLogger(__name__)
 
@@ -157,10 +158,27 @@ def estimate_conformational_density_alt(
     gaps = info["gaps"]
     weights_all = info["weights_all"]
     idx_weights = info["idx_weights"]
+    idx_weights_gap = info["gap_idx"]
+    weights_gap = info["weights_gap"]
     row_labels = [f"iteration {idx} " for idx in idx_weights]
     logger.info("Deconvolution done, size = %s", density.shape)
-    calibrate_density.plot_density(density, plots_dir=plots_dir)
-    calibrate_density.plot_density(weights_all, plots_dir=plots_dir, row_labels=row_labels)
+
+    all_densities_dir = data_dir / "all_densities"
+    output.mkdir_safe(str(all_densities_dir))
+    for idx, weights in enumerate(weights_all):
+        utils.pickle_dump(
+            {"density": weights, "latent_space_bounds": [], "iteration": idx_weights[idx]},
+            str(all_densities_dir / f"deconv_density_alt_{idx}.pkl"),
+        )
+
+    utils.pickle_dump(
+        {"density": weights_gap, "latent_space_bounds": [], "iteration": idx_weights_gap},
+        str(data_dir / "deconv_density_alt_gap.pkl"),
+    )
+
+
+    calibrate_density.plot_density(weights_gap, plots_dir=plots_dir, cbar_normalize=True)
+    calibrate_density.plot_density(weights_all, plots_dir=plots_dir, row_labels=row_labels, cbar_normalize=True)
     calibrate_density.plot_info(losses, gaps, plots_dir=plots_dir)
     plt.close()
 

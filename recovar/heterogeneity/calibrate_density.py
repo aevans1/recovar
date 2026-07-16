@@ -281,7 +281,8 @@ def multiplicative_gradient(
         ## Check current gap against tolerance
         if not reached_gap and gap < tol:
             info["gap_idx"] = k
-            info["weights_gap"] = weights
+            info["weights_gap"] = weights.reshape((num_points_per_dim,) * pca_dim)
+
             reached_gap = True
             logger.info(f"reached gap tolerance, at idx: {k}")
             logger.info(f"final gap: {gap}")

@@ -17,7 +17,7 @@ def make_test_dataset_from_PCs(
     dataset_params_option="dataset2",
     noise_level=0.1,
     noise_scale_std=0.0,
-    contrast_std=0.1,
+    contrast_std=0.0,
     n_images=None,
     seed=None,
     volume_input=None,
@@ -81,7 +81,7 @@ def build_parser():
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducible dataset generation")
     parser.add_argument("--dataset-params-option", type=str, default="dataset2", help="")
     parser.add_argument("--noise-scale-std", type=float, default=0.0, help="")
-    parser.add_argument("--contrast-std", type=float, default=0.1, help="")
+    parser.add_argument("--contrast-std", type=float, default=0.0, help="")
     return parser
 
 
