@@ -1159,6 +1159,264 @@ def simulate_data(
     else:
         return output_array
 
+ # TODO: convert this new function into one that presimulates from a bank of volumes, then mixes the projections according to some sampled z's
+def simulate_data_mix_volumes(
+    experiment_dataset,
+    volumes,
+    noise_variance,
+    batch_size,
+    image_assignments,
+    per_image_contrast,
+    per_image_noise_scale,
+    seed=0,
+    disc_type="linear_interp",
+    mrc_file=None,
+    pad_before_translate=False,
+    Bfactor=100,
+    premultiplied_ctf=False,
+    noise_rng_batch_size=None,
+):
+
+    if disc_type == "pdb":
+        from recovar.simulation import simulate_scattering_potential as gsm
+
+        gt_vols = [
+            gsm.generate_volume_from_atoms(
+                vol,
+                voxel_size=experiment_dataset.voxel_size,
+                grid_size=experiment_dataset.grid_size,
+                freq_coords=None,
+                jax_backend=False,
+            ).reshape(-1)
+            for vol in volumes
+        ]
+        B_fac_vols = [
+            Bfactorize_vol(volume, experiment_dataset.voxel_size, Bfactor, experiment_dataset.volume_shape)
+            for volume in gt_vols
+        ]
+        gt_vols_norm = np.mean(np.linalg.norm(B_fac_vols, axis=(-1)))
+        logger.debug("gt_vols_norm: %s", gt_vols_norm)
+
+    key = jax.random.PRNGKey(seed)
+    if noise_rng_batch_size is None:
+        noise_rng_batch_size = batch_size
+    noise_rng_batch_size = utils.safe_batch_size(noise_rng_batch_size)
+    # A little bit of a hack to account for the fact that noise is complex but goes to real
+    noise_variance_mod = noise_variance.copy()
+    noise_image = noise.make_radial_noise(noise_variance_mod, experiment_dataset.image_shape).reshape(
+        experiment_dataset.image_shape
+    )
+
+    if mrc_file is None:
+        output_array = np.empty(
+            [experiment_dataset.n_images, *experiment_dataset.image_shape], dtype=experiment_dataset.dtype_real
+        )
+    else:
+        output_array = mrc_file.data
+
+    n_images_done = 0
+    for vol_idx, vol in enumerate(volumes):
+        img_indices = np.nonzero(image_assignments == vol_idx)[0]
+        n_images = img_indices.size
+        noise_subkeys = []
+        for _ in range(0, int(np.ceil(n_images / noise_rng_batch_size))):
+            key, subkey = jax.random.split(key)
+            noise_subkeys.append(subkey)
+
+        if disc_type == "nufft":
+            vol_real = fourier_transform_utils.get_idft3(vol.reshape(experiment_dataset.volume_shape))
+        elif "cubic" in disc_type:
+            from recovar.core import cubic_interpolation
+
+            volume = cubic_interpolation.calculate_spline_coefficients(vol.reshape(experiment_dataset.volume_shape))
+        else:
+            volume = vol
+
+        pad_before_ctf = True
+
+        for k in range(0, int(np.ceil(n_images / batch_size))):
+            batch_st = int(k * batch_size)
+            batch_end = int(np.min([(k + 1) * batch_size, n_images]))
+            indices = img_indices[batch_st:batch_end]
+
+            rotation_matrices, translations, ctf_params = experiment_dataset.metadata.get_batch(indices)
+            translations = np.zeros_like(translations) if pad_before_translate else translations
+
+            if disc_type == "nufft":
+                images_batch = simulate_nufft_data_batch(
+                    vol_real,
+                    rotation_matrices,
+                    translations,
+                    ctf_params,
+                    experiment_dataset.voxel_size,
+                    experiment_dataset.volume_shape,
+                    experiment_dataset.image_shape,
+                    experiment_dataset.grid_size,
+                    disc_type,
+                    experiment_dataset.ctf_evaluator,
+                    skip_ctf=pad_before_ctf,
+                )
+            elif disc_type == "pdb":
+                images_batch = (
+                    simulate_nufft_data_batch_from_pdb(
+                        volumes[vol_idx],
+                        rotation_matrices,
+                        translations,
+                        ctf_params,
+                        experiment_dataset.voxel_size,
+                        experiment_dataset.volume_shape,
+                        experiment_dataset.image_shape,
+                        experiment_dataset.grid_size,
+                        disc_type,
+                        experiment_dataset.ctf_evaluator,
+                        skip_ctf=pad_before_ctf,
+                    )
+                    / gt_vols_norm
+                )
+
+            elif "ewald" in disc_type:
+                disc_type_e = disc_type[6:]
+
+                from recovar.reconstruction import ewald
+
+                images_batch_real, images_batch_real_imag = ewald.ewald_sphere_forward_model(
+                    volume.real,
+                    volume.imag,
+                    rotation_matrices,
+                    ctf_params,
+                    experiment_dataset.image_shape,
+                    experiment_dataset.volume_shape,
+                    experiment_dataset.voxel_size,
+                    disc_type_e,
+                    skip_ctf=pad_before_ctf,
+                )
+                images_batch = images_batch_real + 1j * images_batch_real_imag
+
+                images_batch = core.translate_images(images_batch, -translations, experiment_dataset.image_shape)
+
+                if premultiplied_ctf:
+                    raise NotImplementedError("Premultiplied CTF not implemented for Ewald")
+
+            elif disc_type == "linear_interp" or disc_type == "nearest" or disc_type == "cubic":
+                _sim_config = ForwardModelConfig.from_dataset(experiment_dataset, disc_type=disc_type)
+                images_batch = simulate_batch(
+                    _sim_config,
+                    volume,
+                    rotation_matrices,
+                    translations,
+                    ctf_params,
+                    skip_ctf=pad_before_ctf,
+                )
+
+            else:
+                raise ValueError("Invalid disc_type")
+
+            if pad_before_ctf:
+                from recovar.core import padding
+
+                # IF this is on, we did not apply CTF above.
+                upsample_factor = 2
+                upsampled_shape = tuple(np.array(experiment_dataset.image_shape) * upsample_factor)
+                upsampled_CTF = experiment_dataset.ctf_evaluator(
+                    ctf_params, upsampled_shape, experiment_dataset.voxel_size
+                )
+
+                images_batch = padding.pad_images_fourier_domain(
+                    images_batch, experiment_dataset.image_shape, experiment_dataset.grid_size * (upsample_factor - 1)
+                )
+                images_batch = images_batch * upsampled_CTF
+                images_batch = fourier_transform_utils.get_idft2(images_batch.reshape([-1, *upsampled_shape]))
+
+                ## adjust the radial noise to handle the upsampling
+                # Interpolate noise_variance onto a grid that is twice as fine
+                if len(noise_variance) <= 1:
+                    # Single radial bin: constant noise, just tile to upsampled size
+                    noise_variance_mod = np.repeat(noise_variance, upsample_factor)
+                else:
+                    from scipy.interpolate import interp1d
+
+                    original_grid = np.linspace(0, 1, len(noise_variance))
+                    fine_grid = np.linspace(0, 1, len(noise_variance) * upsample_factor)
+                    interpolator = interp1d(original_grid, noise_variance, kind="linear", fill_value="extrapolate")
+                    noise_variance_mod = interpolator(fine_grid)
+                noise_image = noise.make_radial_noise(noise_variance_mod, upsampled_shape).reshape(upsampled_shape)
+
+                ## AND THE MAGIC NUMBER IS... (to make things consistent with the non-premultiplied CTF case)
+                noise_image = noise_image * upsample_factor**2
+
+                # Make big noise from a fixed-chunk RNG stream so that
+                # processing-batch changes (GPU memory) don't perturb noise.
+                noise_batch = make_noise_batch_from_rng_stream(
+                    noise_subkeys,
+                    noise_rng_batch_size,
+                    batch_st,
+                    batch_end,
+                    n_images,
+                    noise_image,
+                    images_batch.shape,
+                )
+                noise_batch *= per_image_noise_scale[indices][..., None, None]
+                images_batch *= per_image_contrast[indices][..., None, None]
+
+                # Now apply CTF AGAIN after noise is added, and unpad
+                images_batch = (images_batch + noise_batch).real
+
+                if premultiplied_ctf:
+                    images_batch = fourier_transform_utils.get_dft2(images_batch)
+                    images_batch = images_batch * upsampled_CTF.reshape(-1, *upsampled_shape)
+                    images_batch = fourier_transform_utils.get_idft2(images_batch)
+
+                if pad_before_translate:
+                    batch_translations = np.asarray(translations)
+                    images_batch = roll_batch(images_batch, -np.round(batch_translations).astype(int)[:, 0], -1)
+                    images_batch = roll_batch(images_batch, -np.round(batch_translations).astype(int)[:, 1], -2)
+
+                images_batch = padding.unpad_images_spatial_domain(
+                    images_batch, experiment_dataset.grid_size * (upsample_factor - 1)
+                ).real
+                output_array[indices] = np.array(images_batch)
+
+            else:
+                if pad_before_translate:
+                    from recovar.core import padding
+
+                    batch_translations = np.asarray(translations)
+                    padded_images = padding.pad_images_spatial_domain(images_batch, experiment_dataset.grid_size)
+                    padded_images = roll_batch(padded_images, -np.round(batch_translations).astype(int)[:, 0], -1)
+                    padded_images = roll_batch(padded_images, -np.round(batch_translations).astype(int)[:, 1], -2)
+                    images_batch = padding.unpad_images_spatial_domain(padded_images, experiment_dataset.grid_size)
+
+                images_batch = fourier_transform_utils.get_idft2(
+                    images_batch.reshape([-1, *experiment_dataset.image_shape])
+                )
+                images_batch = images_batch.real
+                noise_batch = make_noise_batch_from_rng_stream(
+                    noise_subkeys,
+                    noise_rng_batch_size,
+                    batch_st,
+                    batch_end,
+                    n_images,
+                    noise_image,
+                    images_batch.shape,
+                )
+                noise_batch *= per_image_noise_scale[indices][..., None, None]
+                images_batch *= per_image_contrast[indices][..., None, None]
+
+                output_array[indices] = np.array(images_batch + noise_batch)
+
+            n_images_done += indices.size
+            logger.info("Batch %s: Generated %s images so far", k, n_images_done)
+
+    logger.info("Discretizing with: %s", disc_type)
+    logger.info("Done generating data")
+
+    if mrc_file is not None:
+        return mrc_file
+    else:
+        return output_array
+
+
+
 
 def make_noise_batch(subkey, noise_image, images_batch_shape):
     image_size = images_batch_shape[-1] * images_batch_shape[-2]
