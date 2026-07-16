@@ -177,8 +177,8 @@ def estimate_conformational_density_alt(
     )
 
 
-    calibrate_density.plot_density(weights_gap, plots_dir=plots_dir, cbar_normalize=True)
-    calibrate_density.plot_density(weights_all, plots_dir=plots_dir, row_labels=row_labels, cbar_normalize=True)
+    calibrate_density.plot_density(weights_gap, plots_dir=plots_dir, cbar_normalize=False)
+    calibrate_density.plot_density(weights_all, plots_dir=plots_dir, row_labels=row_labels, cbar_normalize=False)
     calibrate_density.plot_info(losses, gaps, plots_dir=plots_dir)
     plt.close()
 
