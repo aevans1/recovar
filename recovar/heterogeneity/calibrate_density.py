@@ -280,7 +280,7 @@ def multiplicative_gradient(
 
         ## Check current gap against tolerance
         if not reached_gap and gap < tol:
-            info["gap_idx"] = k
+            info["idx_gap"] = k
             info["weights_gap"] = weights.reshape((num_points_per_dim,) * pca_dim)
 
             reached_gap = True
@@ -387,7 +387,7 @@ def plot_density(densities, function=None, cmap="inferno", plots_dir=None, row_l
             col = 0
             for k in range(1, density.ndim):
                 to_plot = function(density, [0, k])
-                to_plot = np.flip(to_plot, axis=1) # flip axis to match recovar behavior 
+                #to_plot = np.flip(to_plot, axis=1) # flip axis to match recovar behavior 
 
                 if cbar_normalize:
                     axs[row, col].imshow(to_plot.T, cmap=cmap, origin="lower", vmin=vmin, vmax=vmax)
@@ -417,7 +417,7 @@ def plot_density(densities, function=None, cmap="inferno", plots_dir=None, row_l
 
     plt.subplots_adjust(wspace=0.05, hspace=0.1)
     if plots_dir is not None:
-        if len(densities) == 0:
+        if len(densities) == 1:
             plt.savefig(str(plots_dir / "final_density.png"), dpi=300)
         else:
             plt.savefig(str(plots_dir / "density_all.png"), dpi=300)

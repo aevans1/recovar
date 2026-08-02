@@ -220,6 +220,7 @@ def plot_density(lbfgsb_sols, density, alphas, function=None, cmap="inferno", cb
     from recovar.output.output import sum_over_other
 
     # Normalize solutions first
+    print(len(lbfgsb_sols))
     for idx in range(len(lbfgsb_sols)):
         lbfgsb_sols[idx] /= jnp.sum(lbfgsb_sols[idx])
 
@@ -273,9 +274,9 @@ def plot_density(lbfgsb_sols, density, alphas, function=None, cmap="inferno", cb
             to_plot = function(density, [0, k])
             
             if cbar_normalize:
-                axs[n_plot, k - 1].imshow(to_plot.T, cmap=cmap, vmin=vmin, vmax=vmax)
+                axs[n_plot, k - 1].imshow(to_plot.T, origin="lower", cmap=cmap, vmin=vmin, vmax=vmax)
             else:
-                axs[n_plot, k - 1].imshow(to_plot.T, cmap=cmap)
+                axs[n_plot, k - 1].imshow(to_plot.T, origin="lower", cmap=cmap)
             
             if is_first:
                 axs[n_plot, k - 1].set_title(f"PC x={0}, y={k}")
@@ -283,7 +284,7 @@ def plot_density(lbfgsb_sols, density, alphas, function=None, cmap="inferno", cb
         if density.ndim > 2:
             to_plot = function(density, [1, 2])
             if cbar_normalize:
-                axs[n_plot, k].imshow(to_plot.T, cmap=cmap, vmin=vmin, vmax=vmax)
+                axs[n_plot, k].imshow(to_plot.T, origin="lower", cmap=cmap, vmin=vmin, vmax=vmax)
             else:
                 axs[n_plot, k].imshow(to_plot.T, cmap=cmap)
 
