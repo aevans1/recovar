@@ -1,3 +1,4 @@
+"""Generate a synthetic dataset from pre-computed principal component mrcs"""
 import argparse
 import logging
 import os
@@ -13,42 +14,62 @@ logger = logging.getLogger(__name__)
 
 def make_test_dataset_from_PCs(
     output_dir,
-    image_size=64,
-    dataset_params_option="dataset2",
+    pipeline_dir,
+    image_size=128,
+    dataset_params_option="uniform",
+    volume_distribution_path=None,
     noise_level=0.1,
     noise_scale_std=0.0,
     contrast_std=0.0,
     n_images=None,
     seed=None,
-    volume_input=None,
+    volume_folder_input="/mnt/home/levans/software/recovar/recovar/assets/PCA_example_10345_downsampled_128"
 ):
-    """Generate a synthetic test dataset used by integration tests and examples.
-
-    Parameters keep backward compatibility with older callers while also
-    supporting newer CLI aliases:
-    - ``grid_size``: alias of ``image_size`` (takes precedence when provided)
-    - ``volume_input``: volume prefix root (default: bundled assets)
-    - ``n_tilts``: number of tilts for ``tilt_series=True`` (default: 27)
-    """
     if seed is not None:
         np.random.seed(seed)
     grid_size = image_size
 
-    this_dir = os.path.dirname(__file__)
-    volume_folder_input = volume_input if volume_input is not None else os.path.join(this_dir, "..", "assets", "vol")
-
+    #--------- Get voxel_size from input volumes
+    # TODO: replace "volume_folder_input" above(folder with .mrcs), with a pipeline path, and get mean.mrc, and any number of pcs from an input pipeline
+    # TODO: just read out asset size from the volume size in the input volumes below
+    logger.info("For now, 128^3 size volumes!! Check if loading volumes that are 256, needs to be changed if so")  
+    asset_size = 128  # Needs to be size of the asset volumes used! TODO: just read this out from the volume size in the input volumes below
+    volume_folder_input = f"/mnt/home/levans/software/recovar/recovar/assets/PCA_example_10345_downsampled_{asset_size}"
     output_folder = os.path.join(output_dir, "test_dataset")
     output.mkdir_safe(output_folder)
-    n_images = 1000 if n_images is None else int(n_images)
-    # Voxel size scales with grid size to keep the same physical extent as the 128-px assets.
-    voxel_size = 4.25 * 128 / grid_size
+    n_images = int(n_images)
 
-    # Historical default for bundled 3-volume assets; for custom volume sets,
-    # use uniform distribution over however many volumes are provided.
-    volume_distribution = np.array([1 / 4, 1 / 4, 1 / 2]) if volume_input is None else None
+    # Voxel size scales with grid size to keep the same physical extent as the asset_size-px assets.
+    voxel_size = 4.25 * asset_size / grid_size
 
-    image_stack, sim_info = simulator.generate_synthetic_dataset(
+    #---------Define PC space bounds
+    # using a prob distribution on R^d 
+    # TODO: don't hardcode 2 volumes
+    # TODO: don't hardcode latent space bounds
+    # TODO: don't hardcode num_poitns_per_dim, use code from elsewhere
+    logger.info("For now, hardcoding dim=2 volumes")  
+    logger.info("For now, hardcoding `latent space bounds'")  
+    logger.info("For now, hardcoding num_points_per_dim=200, since hardcoding dim=2")  
+    pca_dim = 2
+    #latent_space_bounds = ld.compute_latent_space_bounds(zs, percentile=1)
+    latent_space_bounds = np.array([[-1e3, 1e3], [-1e3, 1e3]])
+
+    num_points_per_dim = 200
+    num_nodes = num_points_per_dim**pca_dim
+
+    #---------Load Volume distribution
+    if volume_distribution_path is None:
+        volume_distribution = np.ones(num_nodes)/num_nodes
+        logger.info("using uniform distribution on volumes")
+    else:
+        volume_distribution = np.load(volume_distribution_path)
+        logger.info("using loaded volume distribution on volumes")
+
+    #---------Simulate
+    simulator.generate_synthetic_dataset_mix_volumes(
          output_folder=output_folder,
+         pipeline_dir=pipeline_dir,
+         latent_space_bounds=latent_space_bounds,
          voxel_size=voxel_size,
          volumes_path_root=volume_folder_input,
          n_images=n_images,
@@ -72,9 +93,11 @@ def build_parser():
     
     parser = argparse.ArgumentParser(description="Generate a test dataset for recovar")
     parser.add_argument("output_dir", nargs="?", default=os.getcwd(), help="Output directory for the test dataset")
+    parser.add_argument("--pipeline-dir", type=str, default="", help="pipeline directory with a better explanation later")
     parser.add_argument("--noise-level", type=float, default=0.1, help="Noise level for the dataset")
     parser.add_argument("--n-images", type=int, help="Number of images to generate")
     parser.add_argument("--image-size", type=int, default=64, help="Image size (default: 64 for 64x64 images)")
+    parser.add_argument("--volume-distribution-path", default=None, help="path to a volume distribution probability vector")
     parser.add_argument(
         "--volume-input", default=None, help="Optional input volume prefix (e.g. /path/to/vol for vol0000.mrc, ...)"
     )
@@ -86,13 +109,15 @@ def build_parser():
 
 
 def main():
+    logging.basicConfig(level=logging.INFO)
     parser = build_parser()
     args = parser.parse_args()
-    
     make_test_dataset_from_PCs(
         output_dir=args.output_dir,
+        pipeline_dir=args.pipeline_dir,
         image_size=args.image_size,
         dataset_params_option=args.dataset_params_option,
+        volume_distribution_path=args.volume_distribution_path,
         noise_level=args.noise_level,
         noise_scale_std=args.noise_scale_std, 
         contrast_std=args.contrast_std,

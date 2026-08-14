@@ -5,7 +5,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from recovar import utils
+from recovar.utils import utils
 from recovar.heterogeneity import deconvolve_density
 from recovar.output import output
 
@@ -130,7 +130,7 @@ def estimate_conformational_density(
     logger.info("Deconvolution done, size = %s", density.shape)
     deconvolve_density.plot_density(lbfgsb_sols, density, alphas)
     plt.savefig(str(plots_dir / "all_densities.png"))
-    deconvolve_density.plot_density(lbfgsb_sols, density, alphas, cbar_normalize=False)
+    deconvolve_density.plot_density(lbfgsb_sols, density, alphas, cbar_normalize=True)
     plt.savefig(str(plots_dir / "all_densities_cbar_normalize.png"))
     plt.close()
 

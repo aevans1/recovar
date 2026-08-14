@@ -7,7 +7,7 @@ import numpy as np
 
 from recovar.heterogeneity import calibrate_density
 from recovar.output import output
-import recovar.utils as utils
+from recovar.utils import utils
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ def parse_args():
     parser.add_argument(
         "--tol",
         type=float,
-        default=1e-4,
+        default=1e-6,
         help="Sets stopping tolerance for density estimation."   
     )
     parser.add_argument(
@@ -89,12 +89,6 @@ def parse_args():
         default=None,
         help="Batch size of embedded images (zs) to use in online density estimation algorithm.",
     )
-    parser.add_argument(
-        "--batch_size_nodes",
-        type=int,
-        default=None,
-        help="Batch size of nodes (grid points) to use in online density estimation algorithm.",
-    )
     return parser.parse_args()
 
 
@@ -105,13 +99,15 @@ def estimate_conformational_density_alt(
     z_dim_used=4,
     percentile_reject=10,
     num_points_per_dim=None,
-    tol=1e-4,
+    tol=1e-6,
     max_iterations=1000,
-    online=True,
+    online=False,
     weights_frequency=0,
     diagnostic=False,
     batch_size_zs=10000,
 ):
+
+    # Load pipeline
     logger.info(f"online? {online}") 
     recovar_result_dir = Path(recovar_result_dir).expanduser().resolve()
     if not recovar_result_dir.exists():
@@ -140,6 +136,7 @@ def estimate_conformational_density_alt(
     output.mkdir_safe(str(plots_dir))
     output.mkdir_safe(str(data_dir))
 
+    # 
     density, info = calibrate_density.multiplicative_gradient(
         pipeline_output,
         pca_dim=pca_dim,
@@ -158,7 +155,7 @@ def estimate_conformational_density_alt(
     gaps = info["gaps"]
     weights_all = info["weights_all"]
     idx_weights = info["idx_weights"]
-    idx_weights_gap = info["gap_idx"]
+    idx_weights_gap = info["idx_gap"]
     weights_gap = info["weights_gap"]
     row_labels = [f"iteration {idx} " for idx in idx_weights]
     logger.info("Deconvolution done, size = %s", density.shape)
@@ -175,7 +172,6 @@ def estimate_conformational_density_alt(
         {"density": weights_gap, "latent_space_bounds": [], "iteration": idx_weights_gap},
         str(data_dir / "deconv_density_alt_gap.pkl"),
     )
-
 
     calibrate_density.plot_density(weights_gap, plots_dir=plots_dir, cbar_normalize=False)
     calibrate_density.plot_density(weights_all, plots_dir=plots_dir, row_labels=row_labels, cbar_normalize=False)
