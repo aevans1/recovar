@@ -5,9 +5,9 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+from recovar import utils
 from recovar.heterogeneity import calibrate_density
 from recovar.output import output
-from recovar.utils import utils
 
 logger = logging.getLogger(__name__)
 

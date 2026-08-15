@@ -5,7 +5,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from recovar.utils import utils
+from recovar import utils
 from recovar.heterogeneity import deconvolve_density
 from recovar.output import output
 
