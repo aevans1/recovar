@@ -286,7 +286,7 @@ def plot_density(lbfgsb_sols, density, alphas, function=None, cmap="inferno", cb
             if cbar_normalize:
                 axs[n_plot, k].imshow(to_plot.T, origin="lower", cmap=cmap, vmin=vmin, vmax=vmax)
             else:
-                axs[n_plot, k].imshow(to_plot.T, cmap=cmap)
+                axs[n_plot, k].imshow(to_plot.T, origin="lower", cmap=cmap)
 
             axs[n_plot, k].set_xticklabels([])
             axs[n_plot, k].set_yticklabels([])

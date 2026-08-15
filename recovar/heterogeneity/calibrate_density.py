@@ -180,7 +180,7 @@ def multiplicative_gradient(
     pca_dim=2,
     percentile_reject=10,
     num_points_per_dim=None,
-    tol=1e-2,
+    tol=1e-6,
     max_iterations=10000,
     online=True,
     weights_frequency=0,
@@ -374,7 +374,6 @@ def plot_density(densities, function=None, cmap="inferno", plots_dir=None, row_l
     fig, axs = plt.subplots(n_rows, n_cols, figsize=(n_cols * 5, n_rows * 5), squeeze=False)
     for row, density in enumerate(densities):
         if density.ndim == 1:
-            density = np.flip(density.T, axis=1) # flip axis to match recovar behavior 
             axs[row, 0].plot(density)
             axs[row, 0].set_title("PC 0") if row == 0 else None
             axs[row, 0].set_xticklabels([])
