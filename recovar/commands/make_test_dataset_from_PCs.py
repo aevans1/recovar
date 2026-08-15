@@ -97,7 +97,7 @@ def build_parser():
     parser.add_argument("--noise-level", type=float, default=0.1, help="Noise level for the dataset")
     parser.add_argument("--n-images", type=int, help="Number of images to generate")
     parser.add_argument("--image-size", type=int, default=64, help="Image size (default: 64 for 64x64 images)")
-    parser.add_argument("--volume-distribution-path", default=None, help="path to a volume distribution probability vector")
+    parser.add_argument("--latent-distribution-path", default=None, help="path to a volume distribution probability vector")
     parser.add_argument(
         "--volume-input", default=None, help="Optional input volume prefix (e.g. /path/to/vol for vol0000.mrc, ...)"
     )
