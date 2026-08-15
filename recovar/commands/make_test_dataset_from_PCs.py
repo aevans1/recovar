@@ -17,21 +17,21 @@ def make_test_dataset_from_PCs(
     pipeline_dir,
     image_size=128,
     dataset_params_option="uniform",
-    volume_distribution_path=None,
+    latent_distribution_path=None,
     noise_level=0.1,
     noise_scale_std=0.0,
     contrast_std=0.0,
     n_images=None,
     seed=None,
-    volume_folder_input="/mnt/home/levans/software/recovar/recovar/assets/PCA_example_10345_downsampled_128"
 ):
     if seed is not None:
         np.random.seed(seed)
     grid_size = image_size
 
     #--------- Get voxel_size from input volumes
-    # TODO: replace "volume_folder_input" above(folder with .mrcs), with a pipeline path, and get mean.mrc, and any number of pcs from an input pipeline
+    # TODO: replace "volume_folder_input" below(folder with .mrcs), with a pipeline path, and get mean.mrc, and any number of pcs from an input pipeline, and let user pass it
     # TODO: just read out asset size from the volume size in the input volumes below
+    ogger.info("For now, hard coding what volumes are used, with no user choice, need to implement a possibility of loading from a pipeline instead")  
     logger.info("For now, 128^3 size volumes!! Check if loading volumes that are 256, needs to be changed if so")  
     asset_size = 128  # Needs to be size of the asset volumes used! TODO: just read this out from the volume size in the input volumes below
     volume_folder_input = f"/mnt/home/levans/software/recovar/recovar/assets/PCA_example_10345_downsampled_{asset_size}"
@@ -58,12 +58,12 @@ def make_test_dataset_from_PCs(
     num_nodes = num_points_per_dim**pca_dim
 
     #---------Load Volume distribution
-    if volume_distribution_path is None:
-        volume_distribution = np.ones(num_nodes)/num_nodes
-        logger.info("using uniform distribution on volumes")
+    if latent_distribution_path is None:
+        latent_distribution = np.ones(num_nodes)/num_nodes
+        logger.info("using uniform distribution on latent space")
     else:
-        volume_distribution = np.load(volume_distribution_path)
-        logger.info("using loaded volume distribution on volumes")
+        latent_distribution = np.load(latent_distribution_path)
+        logger.info("using loaded latent distribution on latent space")
 
     #---------Simulate
     simulator.generate_synthetic_dataset_mix_volumes(
@@ -74,7 +74,7 @@ def make_test_dataset_from_PCs(
          volumes_path_root=volume_folder_input,
          n_images=n_images,
          grid_size=grid_size,
-         volume_distribution=volume_distribution,
+         latent_distribution=latent_distribution,
          dataset_params_option=dataset_params_option,
          noise_level=noise_level,
          noise_model="radial1",
@@ -117,13 +117,12 @@ def main():
         pipeline_dir=args.pipeline_dir,
         image_size=args.image_size,
         dataset_params_option=args.dataset_params_option,
-        volume_distribution_path=args.volume_distribution_path,
+        latent_distribution_path=args.latent_distribution_path,
         noise_level=args.noise_level,
         noise_scale_std=args.noise_scale_std, 
         contrast_std=args.contrast_std,
         n_images=args.n_images,
         seed=args.seed,
-        volume_input=args.volume_input,
     )
 
 if __name__ == "__main__":

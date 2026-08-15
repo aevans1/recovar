@@ -583,180 +583,6 @@ def load_volumes_from_folder(volumes_path_root, grid_size, trailing_zero_format_
     return volumes
 
 
-def generate_synthetic_dataset_mix_volumes(
-    output_folder,
-    voxel_size,
-    volumes_path_root,
-    n_images,
-    outlier_file_input=None,
-    grid_size=128,
-    volume_distribution=None,
-    dataset_params_option="dataset1",
-    noise_level=1.0,
-    noise_model="radial1",
-    put_extra_particles=True,
-    percent_outliers=0.1,
-    volume_radius=0.9,
-    trailing_zero_format_in_vol_name=True,
-    noise_scale_std=0.3,
-    contrast_std=0.3,
-    disc_type="linear_interp",
-    n_tilts=-1,
-    dose_per_tilt=3,
-    angle_per_tilt=3,
-    image_dtype=np.float16,
-    image_offset_n_std=0.0,
-    per_particle_contrast=True,
-    premultiplied_ctf=False,
-    noise_increase_per_tilt=None,
-    create_nested_structure=False,
-    nested_prefix="Extract/job193",
-    percent_tilt_series_outliers=0.0,
-    noise_rng_batch_size=None,
-):
-    """
-    noise_rng_batch_size : int, optional
-        Batch size used only to advance the random-noise stream. When omitted,
-        it matches the image processing batch size. Supplying a fixed value
-        keeps generated noise independent of GPU-memory-driven processing
-        batch changes (issue #148 fix).
-    """
-    from recovar.output import output
-
-    output.mkdir_safe(output_folder)
-    volumes = load_volumes_from_folder(volumes_path_root, grid_size, trailing_zero_format_in_vol_name, normalize=False)
-    scale_vol = 1 / np.mean(np.linalg.norm(volumes, axis=(-1)))
-    volumes *= scale_vol
-
-    vol_shape = utils.guess_vol_shape_from_vol_size(volumes.shape[-1])
-    volume_distribution = (
-        np.ones(volumes.shape[0]) / volumes.shape[0] if volume_distribution is None else volume_distribution
-    )
-
-    outlier_volume = (
-        fourier_transform_utils.get_dft3(utils.load_mrc(outlier_file_input)).reshape(-1)
-        if outlier_file_input is not None
-        else None
-    )
-
-    dataset_param_generator = get_pose_ctf_generator(dataset_params_option)
-    noise_variance = get_noise_model(noise_model, grid_size) / 50000 * noise_level
-
-    mrc_file = None
-
-    rescale_noise = True
-    if rescale_noise:
-        # Dont use premultiplied_ctf for
-        main_image_stack, ctf_params, rots, trans, simulation_info, voxel_size, _ = generate_simulated_dataset_mix_volumes(
-            volumes,
-            voxel_size,
-            volume_distribution,
-            10,
-            noise_variance,
-            noise_scale_std,
-            contrast_std,
-            put_extra_particles,
-            percent_outliers=percent_outliers,
-            dataset_param_generator=dataset_param_generator,
-            volume_radius=volume_radius,
-            outlier_volume=outlier_volume,
-            disc_type=disc_type,
-            mrc_file=mrc_file,
-            image_offset_n_std=image_offset_n_std,
-            per_particle_contrast=per_particle_contrast,
-            premultiplied_ctf=False,
-        )
-        norm_image_square = np.mean(main_image_stack**2)
-        norm_image = norm_image_square
-
-        noise_variance = noise_variance / (norm_image)
-        volumes = volumes / np.sqrt(norm_image)
-        scale_vol = scale_vol / np.sqrt(norm_image)
-
-    main_image_stack, ctf_params, rots, trans, simulation_info, voxel_size, tilt_groups = generate_simulated_dataset_mix_volumes(
-        volumes,
-        voxel_size,
-        volume_distribution,
-        n_images,
-        noise_variance,
-        noise_scale_std,
-        contrast_std,
-        put_extra_particles,
-        percent_outliers=percent_outliers,
-        dataset_param_generator=dataset_param_generator,
-        volume_radius=volume_radius,
-        outlier_volume=outlier_volume,
-        disc_type=disc_type,
-        mrc_file=mrc_file,
-        n_tilts=n_tilts,
-        dose_per_tilt=dose_per_tilt,
-        angle_per_tilt=angle_per_tilt,
-        image_offset_n_std=image_offset_n_std,
-        per_particle_contrast=per_particle_contrast,
-        premultiplied_ctf=premultiplied_ctf,
-        noise_increase_per_tilt=noise_increase_per_tilt,
-        percent_tilt_series_outliers=percent_tilt_series_outliers,
-        noise_rng_batch_size=noise_rng_batch_size,
-    )
-
-    # Add additional simulation parameters that weren't set in generate_simulated_dataset
-    additional_params = {
-        # Volume parameters
-        "volumes_path_root": volumes_path_root,
-        "trailing_zero_format_in_vol_name": trailing_zero_format_in_vol_name,
-        "scale_vol": scale_vol,
-        # Dataset parameters
-        "grid_size": grid_size,
-        "dataset_params_option": dataset_params_option,
-        "outlier_file_input": outlier_file_input,
-        # Noise parameters
-        "noise_model": noise_model,
-        "noise_level": noise_level,
-    }
-    simulation_info.update(additional_params)
-
-    # Save outputs
-    particles_file = output_folder + f"/particles.{grid_size}.mrcs"
-
-    with mrcfile.new(particles_file, overwrite=True) as mrc:
-        mrc.set_data(main_image_stack.astype(image_dtype))
-        mrc.voxel_size = voxel_size
-    poses = (rots.astype(np.float32), trans.astype(np.float32))
-    utils.pickle_dump(poses, output_folder + "/poses.pkl")
-    save_ctf_params(output_folder, grid_size, ctf_params, voxel_size)
-    utils.pickle_dump(simulation_info, output_folder + "/simulation_info.pkl")
-
-    # Create nested structure if requested
-    if create_nested_structure:
-        # Create nested directories
-        nested_dir = os.path.join(output_folder, nested_prefix)
-        output.mkdir_safe(nested_dir)
-
-        # Move files to nested directory
-        nested_particles_file = os.path.join(nested_dir, f"particles.{grid_size}.mrcs")
-        os.rename(particles_file, nested_particles_file)
-
-        # For star file, use relative path from star file location to mrcs file
-        # The star file will be in output_folder, and the mrcs file will be in nested_dir
-        star_particles_file = f"{nested_prefix}/particles.{grid_size}.mrcs"
-    else:
-        # For non-nested structure, use just the filename since star file and mrcs are in same directory
-        star_particles_file = f"particles.{grid_size}.mrcs"
-
-    utils.write_starfile(
-        ctf_params,
-        rots.astype(np.float32),
-        trans.astype(np.float32),
-        voxel_size,
-        grid_size,
-        star_particles_file,
-        output_folder + "/particles.star",
-        halfset_indices=None,
-        tilt_groups=tilt_groups,
-    )
-
-    return main_image_stack, simulation_info
-
 
 def generate_simulated_dataset(
     volumes,
@@ -1021,334 +847,6 @@ def generate_simulated_dataset(
 
         # Generate tilt outlier images
         tilt_outlier_image_stack = simulate_data(
-            tilt_outlier_dataset,
-            outlier_volume[None],
-            noise_variance,
-            batch_size,
-            np.zeros(n_images_outliers, dtype=int),
-            tilt_outlier_noise_scale,
-            tilt_outlier_contrast,
-            seed=2,
-            disc_type=disc_type,
-            mrc_file=None,
-            premultiplied_ctf=premultiplied_ctf,
-            noise_rng_batch_size=noise_rng_batch_size,
-        )
-        main_image_stack[image_indices_tilt_series_outliers] = tilt_outlier_image_stack
-
-    if n_tilts > 0:
-        # Note that b_facs are stored here just so that the get saved in the starfile in WARP style...
-        ctf_params[:, core.CTFParamIndex.BFACTOR] = B_facs
-
-    simulation_info = {
-        "ctf_params": ctf_params,
-        "rots": rots,
-        "trans": trans,
-        "per_image_contrast": per_image_contrast,
-        "per_image_noise_scale": per_image_noise_scale,
-        "per_image_offset": per_image_offset,
-        "image_assignment": image_assignments,
-        "noise_variance": noise_variance.astype(np.float32),
-        "voxel_size": voxel_size,
-        "tilt_series_assignment": tilt_series_assignment,
-        "tilt_groups": tilt_groups,
-        "per_tilt_contrast": per_tilt_contrast,
-        # Add noise-related parameters
-        "noise_increase_per_tilt": noise_increase_per_tilt,
-        "dose_indices": tilt_numbers if n_tilts > 0 else None,
-        "dose_per_tilt": dose_per_tilt if n_tilts > 0 else None,
-        "angle_per_tilt": angle_per_tilt if n_tilts > 0 else None,
-        "n_tilts": n_tilts if n_tilts > 0 else None,
-        "simulation_batch_size": batch_size,
-        "simulation_noise_rng_batch_size": noise_rng_batch_size,
-    }
-
-    return main_image_stack, ctf_params, rots, trans, simulation_info, voxel_size, tilt_groups
-
-
-def generate_simulated_dataset_mix_volumes(
-    volumes,
-    voxel_size,
-    volume_distribution,
-    n_images,
-    noise_variance,
-    noise_scale_std,
-    contrast_std,
-    put_extra_particles,
-    percent_outliers=0.0,
-    dataset_param_generator=None,
-    volume_radius=0.95,
-    outlier_volume=None,
-    disc_type="linear_interp",
-    mrc_file=None,
-    n_tilts=-1,
-    dose_per_tilt=None,
-    angle_per_tilt=None,
-    voltage=100,
-    image_offset_n_std=0.0,
-    per_particle_contrast=True,
-    premultiplied_ctf=False,
-    noise_increase_per_tilt=None,
-    percent_tilt_series_outliers=0.0,
-    noise_rng_batch_size=None,
-):
-
-    print("changing number of volumes here")
-    volumes = volumes[0:2]
-    volume_shape = utils.guess_vol_shape_from_vol_size(volumes[0].size)
-    grid_size = volume_shape[0]
-
-    ctf_params, rots, trans = dataset_param_generator(n_images, grid_size)
-
-    if "ewald" in disc_type:
-        phase_shift = np.arcsin(ctf_params[:, core.CTFParamIndex.W]) / np.pi * 180
-        ctf_params[:, core.CTFParamIndex.W] = 0
-        ctf_params[:, core.CTFParamIndex.PHASE_SHIFT] = phase_shift
-        ctf_params[:, core.volt_ind] = 100
-
-    trans *= 0
-    per_image_contrast, per_image_noise_scale = generate_contrast_params(n_images, noise_scale_std, contrast_std)
-
-    #----Changing from np choice to a prob distribution on R^d 
-    #image_assignments = np.random.choice(np.arange(volumes.shape[0]), size=n_images, p=volume_distribution)
-    #image_assignments = np.random.choice(np.arange(volumes.shape[0]), size=n_images, p=volume_distribution)
-    pca_dim = len(volumes) 
-    #latent_space_bounds = ld.compute_latent_space_bounds(zs, percentile=1)
-    latent_space_bounds = np.array([[-10000, 10000], [-10000, 10000]])
-    num_points_per_dim = None
-    if num_points_per_dim is None:
-        if pca_dim == 1:
-            num_points_per_dim = 500
-        elif pca_dim == 2:
-            num_points_per_dim = 200
-        elif pca_dim > 2:
-            num_points_per_dim = 50
-    grids_flat = ld.make_latent_space_grid_from_bounds(latent_space_bounds, num_points_per_dim).astype(jnp.float32)
-    nodes = grids_flat.reshape(num_points_per_dim**pca_dim, grids_flat.shape[-1])
-    volume_distribution = jnp.ones(len(nodes))/len(nodes)
-    image_assignments_indices = np.random.choice(np.arange(len(nodes)), size=n_images, p=volume_distribution).astype(int)
-    image_assignments = nodes[image_assignments_indices]
-
-    if n_tilts > 0:
-        # Define tilt groups
-        tilt_groups = np.arange(n_images) // n_tilts
-
-        n_tilt_groups = np.max(tilt_groups) + 1
-
-        # Assign each tilt group to a particle
-        tilt_series_assignment = np.random.choice(
-            np.arange(volumes.shape[0]), size=n_tilt_groups, p=volume_distribution
-        )
-
-        # Assign each image a tilt number
-        tilt_numbers = np.arange(n_images) % n_tilts
-        # Make a tilt series with symmetric angles
-        x_angles_half = np.arange(n_tilts // 2 + 1) * angle_per_tilt
-        x_angles = np.zeros(n_tilts)
-        x_angles[::2] = -x_angles_half[:-1] if n_tilts % 2 == 0 else -x_angles_half
-        x_angles[1::2] = x_angles_half[1:]
-
-        x_angles_zz = np.concatenate([x_angles[:, None], np.zeros([n_tilts, 2])], axis=-1)
-        from scipy.spatial.transform import Rotation
-
-        x_rotations = Rotation.from_euler("xyz", x_angles_zz, degrees=True).as_matrix()
-        B_facs = -4 * (tilt_numbers + 0.5) * dose_per_tilt
-
-        for i in range(n_tilt_groups):
-            image_assignments[tilt_groups == i] = tilt_series_assignment[i]
-            ctf_params[tilt_groups == i, core.CTFParamIndex.CONTRAST] = np.cos(
-                x_angles[tilt_numbers[tilt_groups == i]] / 180 * np.pi
-            )
-
-            ind = np.where(tilt_groups == i)[0]
-            zero_tilt_rot = rots[ind[0]]
-            these_rot = zero_tilt_rot @ x_rotations[tilt_numbers[tilt_groups == i]]
-            rots[ind] = these_rot
-
-        # Tag it to the end
-        if per_particle_contrast:
-            per_tilt_contrast, _ = generate_contrast_params(n_tilt_groups, noise_scale_std, contrast_std)
-            per_image_contrast = per_tilt_contrast[tilt_groups]
-        else:
-            per_tilt_contrast = None
-            per_image_contrast, _ = generate_contrast_params(n_images, noise_scale_std, contrast_std)
-
-        ## Set the ctf_scale_params to angle correction (this is how it is saved from WARP supposedly)
-        angle_scale_correction = jnp.cos(x_angles * np.pi / 180)
-        ctf_params[:, core.CTFParamIndex.CONTRAST] = angle_scale_correction[tilt_numbers]
-
-        # Angle ind is just set to 0 in this version
-        dose = (tilt_numbers + 0.5) * dose_per_tilt
-
-        ctf_params = np.concatenate([ctf_params, dose[:, None], np.zeros_like(tilt_numbers[:, None])], axis=-1)
-
-        ##
-        if noise_increase_per_tilt is not None:
-            per_image_noise_scale *= 1 + noise_increase_per_tilt * tilt_numbers
-    else:
-        per_tilt_contrast = None
-        tilt_groups = None
-        tilt_series_assignment = None
-
-    if n_tilts > 0:
-        ctf_evaluator = core.CTFEvaluator(mode=core.CTFMode.CRYO_ET)
-    else:
-        ctf_evaluator = core.CTFEvaluator()
-
-    main_dataset = cryoem_dataset.CryoEMDataset(
-        None,
-        voxel_size,
-        cryoem_dataset.ImageMetadata(rots, trans, ctf_params),
-        ctf_evaluator=ctf_evaluator,
-        grid_size=grid_size,
-    )
-
-    # cubic interpolation uses ~4x more GPU memory per image than linear
-    mult = 0.5 if "cubic" in disc_type else 5
-    batch_size = int(mult * utils.get_image_batch_size(grid_size, utils.get_gpu_memory_total()))
-    if noise_rng_batch_size is None:
-        noise_rng_batch_size = batch_size
-    noise_rng_batch_size = utils.safe_batch_size(noise_rng_batch_size)
-    logger.info(
-        "Simulation batch sizes: processing=%d, noise_rng=%d",
-        batch_size,
-        noise_rng_batch_size,
-    )
-
-    main_image_stack = simulate_data_mix_volumes(
-        main_dataset,
-        volumes,
-        noise_variance,
-        batch_size,
-        image_assignments,
-        per_image_contrast,
-        per_image_noise_scale,
-        seed=0,
-        disc_type=disc_type,
-        mrc_file=mrc_file,
-        premultiplied_ctf=premultiplied_ctf,
-        noise_rng_batch_size=noise_rng_batch_size,
-    )
-
-    image_means = np.mean(main_image_stack, axis=(-1, -2))
-    image_mean_std = np.std(image_means)
-    logger.info("Image mean mean %s, image mean std: %s", np.mean(image_means), image_mean_std)
-    per_image_offset = np.random.randn(n_images) * image_mean_std * image_offset_n_std
-    main_image_stack += per_image_offset[:, None, None]
-
-    if put_extra_particles:
-        # Make other particles with same ctf but different rots
-        _, rots_2, trans_2 = dataset_param_generator(n_images, grid_size)
-        _, per_image_noise_scale_2 = generate_contrast_params(n_images, noise_scale_std, contrast_std)
-
-        # To first approximation, maybe it is good enough to move them radially
-        # random number on the circle
-        trans_2 = np.random.randn(n_images, 2)
-        trans_2 /= np.linalg.norm(trans_2, axis=-1, keepdims=True)
-        # Move the center by around twice the radius
-        trans_2 *= 2 * volume_radius * volume_shape[0] / 2
-        other_particles_dataset = cryoem_dataset.CryoEMDataset(
-            None,
-            voxel_size,
-            cryoem_dataset.ImageMetadata(rots_2, trans_2, ctf_params),
-            ctf_evaluator=ctf_evaluator,
-            grid_size=grid_size,
-        )
-        # No noise in this stack.
-        extra_particles_image_stack = simulate_data_mix_volumes(
-            other_particles_dataset,
-            volumes,
-            noise_variance * 0,
-            batch_size,
-            image_assignments,
-            per_image_noise_scale_2,
-            per_image_noise_scale,
-            seed=0,
-            disc_type=disc_type,
-            mrc_file=None,
-            pad_before_translate=True,
-            premultiplied_ctf=premultiplied_ctf,
-            noise_rng_batch_size=noise_rng_batch_size,
-        )
-
-        main_image_stack += extra_particles_image_stack
-
-    if percent_outliers > 0:
-        # Perhaps a reasonable way to throw in outliers is to put a different structure entirely with wrong angles
-
-        if outlier_volume is None:
-            raise ValueError("if you want outliers, need to provide a structure")
-        # Make sure they are on the same scale
-
-        outlier_volume = outlier_volume / np.linalg.norm(outlier_volume) * np.mean(np.linalg.norm(volumes, axis=(-1)))
-        n_outlier_images = np.round(percent_outliers * n_images).astype(int)
-        ctf_params_3, rots_3, trans_3 = dataset_param_generator(n_outlier_images, grid_size)
-        outlier_contrast, outlier_noise_scale = generate_contrast_params(
-            n_outlier_images, noise_scale_std, contrast_std
-        )
-
-        outlier_particle_dataset = cryoem_dataset.CryoEMDataset(
-            None,
-            voxel_size,
-            cryoem_dataset.ImageMetadata(rots_3, trans_3, ctf_params_3),
-            ctf_evaluator=ctf_evaluator,
-            grid_size=grid_size,
-        )
-
-        outlier_particle_image_stack = simulate_data_mix_volumes(
-            outlier_particle_dataset,
-            outlier_volume[None],
-            noise_variance,
-            batch_size,
-            np.zeros(n_outlier_images, dtype=int),
-            outlier_noise_scale,
-            outlier_contrast,
-            seed=1,
-            disc_type=disc_type,
-            mrc_file=None,
-            premultiplied_ctf=premultiplied_ctf,
-            noise_rng_batch_size=noise_rng_batch_size,
-        )
-
-        ind_outliers = np.random.choice(n_images, n_outlier_images, replace=False)
-        main_image_stack[ind_outliers] = outlier_particle_image_stack
-        image_assignments[ind_outliers] = -1
-
-    # Handle tilt outliers for tilt series (individual tilts within normal particles)
-    if n_tilts > 0 and percent_tilt_series_outliers > 0:
-        if outlier_volume is None:
-            raise ValueError("if you want tilt outliers, need to provide a structure")
-
-        # Calculate number of tilt outliers
-        n_tilt_series_outliers = np.round(percent_tilt_series_outliers * n_tilt_groups).astype(int)
-        ind_tilt_series_outliers = np.random.choice(np.arange(n_tilt_groups), n_tilt_series_outliers, replace=False)
-        image_indices_tilt_series_outliers = []
-        for ind_tilt_series_outlier in ind_tilt_series_outliers:
-            ind_tilt_outliers = np.where(tilt_groups == ind_tilt_series_outlier)[0]
-            image_assignments[ind_tilt_outliers] = -2
-            tilt_series_assignment[ind_tilt_series_outlier] = -1
-            image_indices_tilt_series_outliers.extend(ind_tilt_outliers)
-        image_indices_tilt_series_outliers = np.array(image_indices_tilt_series_outliers)
-        n_images_outliers = image_indices_tilt_series_outliers.size
-        # Generate parameters for tilt outliers
-        ctf_params_tilt_outliers, rots_tilt_outliers, trans_tilt_outliers = dataset_param_generator(
-            n_images_outliers, grid_size
-        )
-        tilt_outlier_contrast, tilt_outlier_noise_scale = generate_contrast_params(
-            n_images_outliers, noise_scale_std, contrast_std
-        )
-
-        # Create dataset for tilt outliers
-        tilt_outlier_dataset = cryoem_dataset.CryoEMDataset(
-            None,
-            voxel_size,
-            cryoem_dataset.ImageMetadata(rots_tilt_outliers, trans_tilt_outliers, ctf_params_tilt_outliers),
-            ctf_evaluator=ctf_evaluator,
-            grid_size=grid_size,
-        )
-
-        # Generate tilt outlier images
-        tilt_outlier_image_stack = simulate_data_mix_volumes(
             tilt_outlier_dataset,
             outlier_volume[None],
             noise_variance,
@@ -1665,9 +1163,417 @@ def simulate_data(
     else:
         return output_array
 
- # TODO: convert this new function into one that presimulates from a bank of volumes, then mixes the projections according to some sampled z's
-def simulate_data_mix_volumes(
+
+def make_noise_batch(subkey, noise_image, images_batch_shape):
+    image_size = images_batch_shape[-1] * images_batch_shape[-2]
+    noise_batch = jax.random.normal(subkey, images_batch_shape) / jnp.sqrt(image_size)
+
+    noise_batch_ft = fourier_transform_utils.get_dft2(noise_batch.reshape(images_batch_shape))
+    noise_batch_ft *= jnp.sqrt(noise_image)
+    noise_batch = fourier_transform_utils.get_idft2(noise_batch_ft.reshape(images_batch_shape)).real
+    return noise_batch
+
+
+def make_noise_batch_from_rng_stream(
+    noise_subkeys,
+    noise_rng_batch_size,
+    batch_st,
+    batch_end,
+    n_images,
+    noise_image,
+    images_batch_shape,
+):
+    """Return noise for a processing batch from a fixed reference RNG stream.
+
+    The RNG stream is chunked by ``noise_rng_batch_size`` (independent
+    of the processing ``batch_size``). For a processing batch spanning
+    [batch_st, batch_end), pulls the corresponding pieces from one or
+    more RNG chunks and concatenates them. This decouples generated
+    noise from GPU-memory-driven processing-batch shape changes
+    (issue #148 fix).
+    """
+    if batch_end <= batch_st:
+        raise ValueError("batch_end must be greater than batch_st")
+
+    first_rng_batch = batch_st // noise_rng_batch_size
+    last_rng_batch = (batch_end - 1) // noise_rng_batch_size
+    image_shape = tuple(images_batch_shape[-2:])
+    pieces = []
+
+    for rng_batch_idx in range(first_rng_batch, last_rng_batch + 1):
+        rng_st = rng_batch_idx * noise_rng_batch_size
+        rng_end = min((rng_batch_idx + 1) * noise_rng_batch_size, n_images)
+        rng_shape = (rng_end - rng_st, *image_shape)
+        rng_noise = make_noise_batch(noise_subkeys[rng_batch_idx], noise_image, rng_shape)
+
+        slice_st = max(batch_st, rng_st) - rng_st
+        slice_end = min(batch_end, rng_end) - rng_st
+        pieces.append(rng_noise[slice_st:slice_end])
+
+    if len(pieces) == 1:
+        return pieces[0]
+    return jnp.concatenate(pieces, axis=0)
+
+
+# ============================================================================
+# Additional simulator for a mixture a volumes
+# ============================================================================
+def generate_synthetic_dataset_mix_volumes(
+    output_folder,
+    pipeline_dir,
+    latent_space_bounds,
+    voxel_size,
+    volumes_path_root,
+    n_images,
+    outlier_file_input=None,
+    grid_size=128,
+    latent_distribution=None,
+    dataset_params_option="dataset1",
+    noise_level=1.0,
+    noise_model="radial1",
+    put_extra_particles=False,
+    percent_outliers=0.0,
+    volume_radius=0.9,
+    trailing_zero_format_in_vol_name=True,
+    noise_scale_std=0.3,
+    contrast_std=0.3,
+    disc_type="linear_interp",
+    n_tilts=-1,
+    dose_per_tilt=3,
+    angle_per_tilt=3,
+    image_dtype=np.float16,
+    image_offset_n_std=0.0,
+    per_particle_contrast=True,
+    premultiplied_ctf=False,
+    noise_increase_per_tilt=None,
+    create_nested_structure=False,
+    nested_prefix="Extract/job193",
+    percent_tilt_series_outliers=0.0,
+    noise_rng_batch_size=None,
+):
+    """
+    noise_rng_batch_size : int, optional
+        Batch size used only to advance the random-noise stream. When omitted,
+        it matches the image processing batch size. Supplying a fixed value
+        keeps generated noise independent of GPU-memory-driven processing
+        batch changes (issue #148 fix).
+    """
+    from recovar.output import output
+
+    output.mkdir_safe(output_folder)
+    logger.info("Hard coding volume names")
+    mean_volume, voxel_size = generate_volumes_from_mrcs([volumes_path_root + "/" + "mean.mrc"], grid_size, padding=0)
+    volumes = load_volumes_from_folder(volumes_path_root+"/", grid_size, trailing_zero_format_in_vol_name, normalize=False)
+
+    #----Here loading these up because I think we will need them later... ----
+    # TODO: load the volumes in from a pipeline and then downsample 
+    #logger.info("Loading up mean and u's from some piplein")
+    #logger.info("Note: for now, gridsize of simulation has to match that of the pipeline load stuff. in future these will be downsampled if needed")
+    #po = output.PipelineOutput(pipeline_dir)
+    #volumes = po.get_u_real(n_pcs=2)
+    #mean = po.get("mean")
+    #mean_volume = utils.load_mrc(po.paths.mean_volume)
+    #s = po.get("s")[:2]
+    #zs, _, _, _ = embedding.get_per_image_embedding(
+    #    po.get("mean"), u, s, n_pcs, dataset, po.get("volume_mask", utils.get_gpu_memory_total())
+    #)
+
+    logger.info("getting mean of volumes and mean_volume to divide by their norm, hacky for now.") 
+    all_volumes = jnp.vstack([volumes, mean_volume.flatten()[None, :]])
+    scale_vol = 1 / np.mean(np.linalg.norm(all_volumes, axis=(-1)))
+    volumes *= scale_vol
+    mean_volume *= scale_vol
+
+    outlier_volume = (
+        fourier_transform_utils.get_dft3(utils.load_mrc(outlier_file_input)).reshape(-1)
+        if outlier_file_input is not None
+        else None
+    )
+
+    dataset_param_generator = get_pose_ctf_generator(dataset_params_option)
+    noise_variance = get_noise_model(noise_model, grid_size) / 50000 * noise_level
+
+    mrc_file = None
+
+    logger.info("Doing noise rescaling in mixture volumes with lots of images, to prevent 0 norms?")
+    rescale_noise = True
+    if rescale_noise:
+        # Dont use premultiplied_ctf for
+        main_image_stack, ctf_params, rots, trans, simulation_info, voxel_size, _ = generate_simulated_dataset_mix_volumes(
+            mean_volume,
+            volumes,
+            latent_space_bounds,
+            voxel_size,
+            latent_distribution,
+            10000,
+            noise_variance,
+            noise_scale_std,
+            contrast_std,
+            put_extra_particles,
+            percent_outliers=percent_outliers,
+            dataset_param_generator=dataset_param_generator,
+            volume_radius=volume_radius,
+            outlier_volume=outlier_volume,
+            disc_type=disc_type,
+            mrc_file=mrc_file,
+            image_offset_n_std=image_offset_n_std,
+            per_particle_contrast=per_particle_contrast,
+            premultiplied_ctf=False,
+        )
+        norm_image_square = np.mean(main_image_stack**2)
+        norm_image = norm_image_square
+
+        noise_variance = noise_variance / (norm_image)
+        volumes = volumes / np.sqrt(norm_image)
+        mean_volume = mean_volume / np.sqrt(norm_image)
+        scale_vol = scale_vol / np.sqrt(norm_image)
+        logger.info("rescaling latent space bounds") 
+        latent_space_bounds *= scale_vol
+
+    main_image_stack, ctf_params, rots, trans, simulation_info, voxel_size, tilt_groups = generate_simulated_dataset_mix_volumes(
+        mean_volume, 
+        volumes,
+        latent_space_bounds,
+        voxel_size,
+        latent_distribution,
+        n_images,
+        noise_variance,
+        noise_scale_std,
+        contrast_std,
+        put_extra_particles,
+        percent_outliers=percent_outliers,
+        dataset_param_generator=dataset_param_generator,
+        volume_radius=volume_radius,
+        outlier_volume=outlier_volume,
+        disc_type=disc_type,
+        mrc_file=mrc_file,
+        n_tilts=n_tilts,
+        dose_per_tilt=dose_per_tilt,
+        angle_per_tilt=angle_per_tilt,
+        image_offset_n_std=image_offset_n_std,
+        per_particle_contrast=per_particle_contrast,
+        premultiplied_ctf=premultiplied_ctf,
+        noise_increase_per_tilt=noise_increase_per_tilt,
+        percent_tilt_series_outliers=percent_tilt_series_outliers,
+        noise_rng_batch_size=noise_rng_batch_size,
+    )
+
+    # Add additional simulation parameters that weren't set in generate_simulated_dataset
+    additional_params = {
+        # Volume parameters
+        "volumes_path_root": volumes_path_root,
+        "trailing_zero_format_in_vol_name": trailing_zero_format_in_vol_name,
+        "scale_vol": scale_vol,
+        # Dataset parameters
+        "grid_size": grid_size,
+        "dataset_params_option": dataset_params_option,
+        "outlier_file_input": outlier_file_input,
+        # Noise parameters
+        "noise_model": noise_model,
+        "noise_level": noise_level,
+    }
+    simulation_info.update(additional_params)
+
+    # Save outputs
+    particles_file = output_folder + f"/particles.{grid_size}.mrcs"
+
+    with mrcfile.new(particles_file, overwrite=True) as mrc:
+        mrc.set_data(main_image_stack.astype(image_dtype))
+        mrc.voxel_size = voxel_size
+    poses = (rots.astype(np.float32), trans.astype(np.float32))
+    utils.pickle_dump(poses, output_folder + "/poses.pkl")
+    save_ctf_params(output_folder, grid_size, ctf_params, voxel_size)
+    utils.pickle_dump(simulation_info, output_folder + "/simulation_info.pkl")
+
+    # Create nested structure if requested
+    if create_nested_structure:
+        # Create nested directories
+        nested_dir = os.path.join(output_folder, nested_prefix)
+        output.mkdir_safe(nested_dir)
+
+        # Move files to nested directory
+        nested_particles_file = os.path.join(nested_dir, f"particles.{grid_size}.mrcs")
+        os.rename(particles_file, nested_particles_file)
+
+        # For star file, use relative path from star file location to mrcs file
+        # The star file will be in output_folder, and the mrcs file will be in nested_dir
+        star_particles_file = f"{nested_prefix}/particles.{grid_size}.mrcs"
+    else:
+        # For non-nested structure, use just the filename since star file and mrcs are in same directory
+        star_particles_file = f"particles.{grid_size}.mrcs"
+
+    utils.write_starfile(
+        ctf_params,
+        rots.astype(np.float32),
+        trans.astype(np.float32),
+        voxel_size,
+        grid_size,
+        star_particles_file,
+        output_folder + "/particles.star",
+        halfset_indices=None,
+        tilt_groups=tilt_groups,
+    )
+
+    return main_image_stack, simulation_info
+
+
+def generate_simulated_dataset_mix_volumes(
+    mean_volume, 
+    volumes,
+    latent_space_bounds,
+    voxel_size,
+    latent_distribution,
+    n_images,
+    noise_variance,
+    noise_scale_std,
+    contrast_std,
+    put_extra_particles,
+    percent_outliers=0.0,
+    dataset_param_generator=None,
+    volume_radius=0.95,
+    outlier_volume=None,
+    disc_type="linear_interp",
+    mrc_file=None,
+    n_tilts=-1,
+    dose_per_tilt=None,
+    angle_per_tilt=None,
+    voltage=100,
+    image_offset_n_std=0.0,
+    per_particle_contrast=True,
+    premultiplied_ctf=False,
+    noise_increase_per_tilt=None,
+    percent_tilt_series_outliers=0.0,
+    noise_rng_batch_size=None,
+):
+
+    volume_shape = utils.guess_vol_shape_from_vol_size(volumes[0].size)
+    grid_size = volume_shape[0]
+
+    ctf_params, rots, trans = dataset_param_generator(n_images, grid_size)
+
+    if "ewald" in disc_type:
+        phase_shift = np.arcsin(ctf_params[:, core.CTFParamIndex.W]) / np.pi * 180
+        ctf_params[:, core.CTFParamIndex.W] = 0
+        ctf_params[:, core.CTFParamIndex.PHASE_SHIFT] = phase_shift
+        ctf_params[:, core.volt_ind] = 100
+
+    trans *= 0
+    per_image_contrast, per_image_noise_scale = generate_contrast_params(n_images, noise_scale_std, contrast_std)
+
+    #----Changing from np choice to a prob distribution on R^d 
+    pca_dim = len(volumes) 
+    num_points_per_dim = None
+    if num_points_per_dim is None:
+        if pca_dim == 1:
+            num_points_per_dim = 500
+        elif pca_dim == 2:
+            num_points_per_dim = 200
+        elif pca_dim > 2:
+            num_points_per_dim = 50
+    
+
+    logger.info("For latent grid, transposing to match conventions used to make the input volume distribution") 
+    grids_flat = ld.make_latent_space_grid_from_bounds(latent_space_bounds, num_points_per_dim).astype(jnp.float32)
+    nodes = grids_flat.reshape(num_points_per_dim**pca_dim, grids_flat.shape[-1])
+
+    seed = 8393939
+    choice_key = jax.random.key(seed)
+
+    # TODO: make sure volume-distribution in latent space has mean 0, maybe also has same variance as eigvals of covar
+    #latent_distribution_shifted = latent_distribution - jnp.mean(points*latent_distribution[:, None], axis=0)
+
+    # TODO: if it matters, instead of using jnp.choice, pass in continuous sampled latent image assignments, e.g from langevin from latent_distribution, with correct scaling
+    if latent_distribution is None:
+        logger.info("No latent distribution passed, so simulating from uniform distribution on latents")
+    image_assignments_indices = jax.random.choice(choice_key, jnp.arange(len(nodes)), shape=(n_images,), p=latent_distribution, mode="high").astype(int)
+    image_assignments = nodes[image_assignments_indices]
+
+    if n_tilts > 0:
+        raise NotImplementedError("tilt series not supported yet for mix volume simulator")
+    else:
+        per_tilt_contrast = None
+        tilt_groups = None
+        tilt_series_assignment = None
+        ctf_evaluator = core.CTFEvaluator()
+
+    main_dataset = cryoem_dataset.CryoEMDataset(
+        None,
+        voxel_size,
+        cryoem_dataset.ImageMetadata(rots, trans, ctf_params),
+        ctf_evaluator=ctf_evaluator,
+        grid_size=grid_size,
+    )
+
+    # cubic interpolation uses ~4x more GPU memory per image than linear
+    mult = 0.5 if "cubic" in disc_type else 5
+    batch_size = int(mult * utils.get_image_batch_size(grid_size, utils.get_gpu_memory_total()))
+    if noise_rng_batch_size is None:
+        noise_rng_batch_size = batch_size
+    noise_rng_batch_size = utils.safe_batch_size(noise_rng_batch_size)
+    logger.info(
+        "Simulation batch sizes: processing=%d, noise_rng=%d",
+        batch_size,
+        noise_rng_batch_size,
+    )
+
+    main_image_stack = simulate_data_mix_volumes(
+        main_dataset,
+        mean_volume,
+        volumes,
+        noise_variance,
+        batch_size,
+        image_assignments,
+        per_image_contrast,
+        per_image_noise_scale,
+        seed=0,
+        disc_type=disc_type,
+        mrc_file=mrc_file,
+        premultiplied_ctf=premultiplied_ctf,
+        noise_rng_batch_size=noise_rng_batch_size,
+    )
+
+    image_means = np.mean(main_image_stack, axis=(-1, -2))
+    image_mean_std = np.std(image_means)
+    logger.info("Image mean mean %s, image mean std: %s", np.mean(image_means), image_mean_std)
+    per_image_offset = np.random.randn(n_images) * image_mean_std * image_offset_n_std
+    main_image_stack += per_image_offset[:, None, None]
+
+    ######## TODO: implement these if this simulator file ends up getting used going forward, for not necessary
+    if put_extra_particles:
+        raise NotImplementedError("extra particles not supported yet in mix volumes simulator")
+    if percent_outliers > 0:
+        raise NotImplementedError("percent outliers not supported yet in mix volumes simulator")
+    #######
+
+    simulation_info = {
+        "ctf_params": ctf_params,
+        "rots": rots,
+        "trans": trans,
+        "per_image_contrast": per_image_contrast,
+        "per_image_noise_scale": per_image_noise_scale,
+        "per_image_offset": per_image_offset,
+        "image_assignment": image_assignments,
+        "noise_variance": noise_variance.astype(np.float32),
+        "voxel_size": voxel_size,
+        "tilt_series_assignment": tilt_series_assignment,
+        "tilt_groups": tilt_groups,
+        "per_tilt_contrast": per_tilt_contrast,
+        # Add noise-related parameters
+        "noise_increase_per_tilt": noise_increase_per_tilt,
+        "dose_indices": None,
+        "dose_per_tilt": None,
+        "angle_per_tilt": None,
+        "n_tilts": None,
+        "simulation_batch_size": batch_size,
+        "simulation_noise_rng_batch_size": noise_rng_batch_size,
+    }
+
+    return main_image_stack, ctf_params, rots, trans, simulation_info, voxel_size, tilt_groups
+
+
+def simulate_data_mix_volumes( 
     experiment_dataset,
+    mean_volume,
     volumes,
     noise_variance,
     batch_size,
@@ -1694,7 +1600,6 @@ def simulate_data_mix_volumes(
         experiment_dataset.image_shape
     )
 
-    #----Dunno what this does-----
     if mrc_file is None:
         output_array = np.empty(
             [experiment_dataset.n_images, *experiment_dataset.image_shape], dtype=experiment_dataset.dtype_real
@@ -1703,6 +1608,9 @@ def simulate_data_mix_volumes(
         output_array = mrc_file.data
 
     n_images_done = 0
+
+    #----Adding a fourier space collector/buffer, same size as output array but for complex value-----
+    fourier_buffer = output_array.copy().astype("complex64")
 
     #----My change here: set n_images to be the full amount for the dataset, and indics to be all image indices-----
     n_images = experiment_dataset.n_images
@@ -1715,7 +1623,22 @@ def simulate_data_mix_volumes(
         noise_subkeys.append(subkey)
 
 
-    for vol_idx, vol in enumerate(volumes):
+    #----Here, making sure mean volume is index num_vols of 0,1,..,num_vols and if its num_vols idx (the mean), not adding a z to it, so that its A_i(Uz_i + mean_volume)
+    # TODO: read in pca_dim as a parameter, instead of this line
+    pca_dim = volumes.shape[0] 
+
+    logger.info("hackily appending a volume here")
+    all_volumes = jnp.vstack([volumes, mean_volume])
+
+    # NOTE: this flag seems like its always on in the simulator, keeping it in the outside loop
+    pad_before_ctf = True
+
+    for vol_idx, vol in enumerate(all_volumes):
+        if vol_idx < pca_dim:
+            logger.info(f"Simulating from volume {vol_idx}")
+        else:
+            logger.info("Simulating from mean volume")
+
         #----Simulate a volume-----
         if disc_type == "nufft":
             vol_real = fourier_transform_utils.get_idft3(vol.reshape(experiment_dataset.volume_shape))
@@ -1726,8 +1649,7 @@ def simulate_data_mix_volumes(
         else:
             volume = vol
 
-        pad_before_ctf = True
-
+        
         for k in range(0, int(np.ceil(n_images / batch_size))):
             batch_st = int(k * batch_size)
             batch_end = int(np.min([(k + 1) * batch_size, n_images]))
@@ -1788,173 +1710,105 @@ def simulate_data_mix_volumes(
                 raise ValueError("Invalid disc_type")
             #----Add projections of volume, to images at those indices-----
             # (this builds up images from projections of a set of volumes)
-            output_array[indices] += image_assignments[indices, vol_idx]*np.array(images_batch + noise_batch)
 
-        #---- All CTF and Noise----            
-        #---- Here, passing through images again to add CTF and noise----            
-        for k in range(0, int(np.ceil(n_images / batch_size))):
-            batch_st = int(k * batch_size)
-            batch_end = int(np.min([(k + 1) * batch_size, n_images]))
-            indices = img_indices[batch_st:batch_end]
-
-            _, translations, ctf_params = experiment_dataset.metadata.get_batch(indices)
-            translations = np.zeros_like(translations) if pad_before_translate else translations
-
-
-            if pad_before_ctf:
-                from recovar.core import padding
-
-                # IF this is on, we did not apply CTF above.
-                upsample_factor = 2
-                upsampled_shape = tuple(np.array(experiment_dataset.image_shape) * upsample_factor)
-                upsampled_CTF = experiment_dataset.ctf_evaluator(
-                    ctf_params, upsampled_shape, experiment_dataset.voxel_size
-                )
-
-                images_batch = padding.pad_images_fourier_domain(
-                    images_batch, experiment_dataset.image_shape, experiment_dataset.grid_size * (upsample_factor - 1)
-                )
-                images_batch = images_batch * upsampled_CTF
-                images_batch = fourier_transform_utils.get_idft2(images_batch.reshape([-1, *upsampled_shape]))
-
-                ## adjust the radial noise to handle the upsampling
-                # Interpolate noise_variance onto a grid that is twice as fine
-                if len(noise_variance) <= 1:
-                    # Single radial bin: constant noise, just tile to upsampled size
-                    noise_variance_mod = np.repeat(noise_variance, upsample_factor)
-                else:
-                    from scipy.interpolate import interp1d
-
-                    original_grid = np.linspace(0, 1, len(noise_variance))
-                    fine_grid = np.linspace(0, 1, len(noise_variance) * upsample_factor)
-                    interpolator = interp1d(original_grid, noise_variance, kind="linear", fill_value="extrapolate")
-                    noise_variance_mod = interpolator(fine_grid)
-                noise_image = noise.make_radial_noise(noise_variance_mod, upsampled_shape).reshape(upsampled_shape)
-
-                ## AND THE MAGIC NUMBER IS... (to make things consistent with the non-premultiplied CTF case)
-                noise_image = noise_image * upsample_factor**2
-
-                # Make big noise from a fixed-chunk RNG stream so that
-                # processing-batch changes (GPU memory) don't perturb noise.
-                noise_batch = make_noise_batch_from_rng_stream(
-                    noise_subkeys,
-                    noise_rng_batch_size,
-                    batch_st,
-                    batch_end,
-                    n_images,
-                    noise_image,
-                    images_batch.shape,
-                )
-                noise_batch *= per_image_noise_scale[indices][..., None, None]
-                images_batch *= per_image_contrast[indices][..., None, None]
-
-                # Now apply CTF AGAIN after noise is added, and unpad
-                images_batch = (images_batch + noise_batch).real
-
-                if premultiplied_ctf:
-                    images_batch = fourier_transform_utils.get_dft2(images_batch)
-                    images_batch = images_batch * upsampled_CTF.reshape(-1, *upsampled_shape)
-                    images_batch = fourier_transform_utils.get_idft2(images_batch)
-
-                if pad_before_translate:
-                    batch_translations = np.asarray(translations)
-                    images_batch = roll_batch(images_batch, -np.round(batch_translations).astype(int)[:, 0], -1)
-                    images_batch = roll_batch(images_batch, -np.round(batch_translations).astype(int)[:, 1], -2)
-
-                images_batch = padding.unpad_images_spatial_domain(
-                    images_batch, experiment_dataset.grid_size * (upsample_factor - 1)
-                ).real
-                output_array[indices] = np.array(images_batch)
-
+            #Reshaping that's needed, usually happens at a ctf step
+            image_shape = np.array(experiment_dataset.image_shape)
+            
+            if vol_idx < pca_dim:
+                # We aren't on the mean volume, increment as usual
+                fourier_buffer[indices] += image_assignments[indices, vol_idx, None, None]*np.array(images_batch.reshape([-1, *image_shape]))
             else:
-                if pad_before_translate:
-                    from recovar.core import padding
+                # this is the last index, the mean volume, don't combine with image_assignments coeffs.
+                fourier_buffer[indices] += np.array(images_batch.reshape([-1, *image_shape]))
+ 
 
-                    batch_translations = np.asarray(translations)
-                    padded_images = padding.pad_images_spatial_domain(images_batch, experiment_dataset.grid_size)
-                    padded_images = roll_batch(padded_images, -np.round(batch_translations).astype(int)[:, 0], -1)
-                    padded_images = roll_batch(padded_images, -np.round(batch_translations).astype(int)[:, 1], -2)
-                    images_batch = padding.unpad_images_spatial_domain(padded_images, experiment_dataset.grid_size)
+    #---- All CTF and Noise----            
+    #---- Here, passing through images again to add CTF and noise----            
+    for k in range(0, int(np.ceil(n_images / batch_size))):
+        batch_st = int(k * batch_size)
+        batch_end = int(np.min([(k + 1) * batch_size, n_images]))
+        indices = img_indices[batch_st:batch_end]
+        
+        #---- Reloading pre-computed projections----            
+        images_batch = fourier_buffer[indices]
 
-                images_batch = fourier_transform_utils.get_idft2(
-                    images_batch.reshape([-1, *experiment_dataset.image_shape])
-                )
-                images_batch = images_batch.real
-                noise_batch = make_noise_batch_from_rng_stream(
-                    noise_subkeys,
-                    noise_rng_batch_size,
-                    batch_st,
-                    batch_end,
-                    n_images,
-                    noise_image,
-                    images_batch.shape,
-                )
-                noise_batch *= per_image_noise_scale[indices][..., None, None]
-                images_batch *= per_image_contrast[indices][..., None, None]
+        _, translations, ctf_params = experiment_dataset.metadata.get_batch(indices)
+        translations = np.zeros_like(translations) if pad_before_translate else translations
 
-                output_array[indices] += np.array(images_batch + noise_batch)
 
-                n_images_done += indices.size
-            logger.info("Batch %s: Generated %s images so far", k, n_images_done)
+        # IF this block is on, we did not apply CTF above, and pad_before_ctf=True
+        # previously, this only ran if pad_before_CTF=True, but its hard coded in the corresponding simulate_ anyway
+        from recovar.core import padding
+        upsample_factor = 2
+        upsampled_shape = tuple(np.array(experiment_dataset.image_shape) * upsample_factor)
+        upsampled_CTF = experiment_dataset.ctf_evaluator(
+            ctf_params, upsampled_shape, experiment_dataset.voxel_size
+        )
+        images_batch = padding.pad_images_fourier_domain(
+            images_batch, experiment_dataset.image_shape, experiment_dataset.grid_size * (upsample_factor - 1)
+        )
+        images_batch = images_batch * upsampled_CTF
+        images_batch = fourier_transform_utils.get_idft2(images_batch.reshape([-1, *upsampled_shape]))
 
-        logger.info("Discretizing with: %s", disc_type)
-        logger.info("Done generating data")
+        ## adjust the radial noise to handle the upsampling
+        # Interpolate noise_variance onto a grid that is twice as fine
+        if len(noise_variance) <= 1:
+            # Single radial bin: constant noise, just tile to upsampled size
+            noise_variance_mod = np.repeat(noise_variance, upsample_factor)
+        else:
+            from scipy.interpolate import interp1d
+
+            original_grid = np.linspace(0, 1, len(noise_variance))
+            fine_grid = np.linspace(0, 1, len(noise_variance) * upsample_factor)
+            interpolator = interp1d(original_grid, noise_variance, kind="linear", fill_value="extrapolate")
+            noise_variance_mod = interpolator(fine_grid)
+        noise_image = noise.make_radial_noise(noise_variance_mod, upsampled_shape).reshape(upsampled_shape)
+
+        ## AND THE MAGIC NUMBER IS... (to make things consistent with the non-premultiplied CTF case)
+        noise_image = noise_image * upsample_factor**2
+
+        # Make big noise from a fixed-chunk RNG stream so that
+        # processing-batch changes (GPU memory) don't perturb noise.
+        noise_batch = make_noise_batch_from_rng_stream(
+            noise_subkeys,
+            noise_rng_batch_size,
+            batch_st,
+            batch_end,
+            n_images,
+            noise_image,
+            images_batch.shape,
+        )
+        noise_batch *= per_image_noise_scale[indices][..., None, None]
+        images_batch *= per_image_contrast[indices][..., None, None]
+
+        # Now apply CTF AGAIN after noise is added, and unpad
+        images_batch = (images_batch + noise_batch).real
+
+        if premultiplied_ctf:
+            images_batch = fourier_transform_utils.get_dft2(images_batch)
+            images_batch = images_batch * upsampled_CTF.reshape(-1, *upsampled_shape)
+            images_batch = fourier_transform_utils.get_idft2(images_batch)
+
+        if pad_before_translate:
+            batch_translations = np.asarray(translations)
+            images_batch = roll_batch(images_batch, -np.round(batch_translations).astype(int)[:, 0], -1)
+            images_batch = roll_batch(images_batch, -np.round(batch_translations).astype(int)[:, 1], -2)
+
+        images_batch = padding.unpad_images_spatial_domain(
+            images_batch, experiment_dataset.grid_size * (upsample_factor - 1)
+        ).real
+        output_array[indices] = np.array(images_batch)
+
+        n_images_done += indices.size
+        logger.info("Batch %s: Generated %s images so far", k, n_images_done)
+
+    logger.info("Discretizing with: %s", disc_type)
+    logger.info("Done generating data")
 
     if mrc_file is not None:
         return mrc_file
     else:
         return output_array
-
-
-def make_noise_batch(subkey, noise_image, images_batch_shape):
-    image_size = images_batch_shape[-1] * images_batch_shape[-2]
-    noise_batch = jax.random.normal(subkey, images_batch_shape) / jnp.sqrt(image_size)
-
-    noise_batch_ft = fourier_transform_utils.get_dft2(noise_batch.reshape(images_batch_shape))
-    noise_batch_ft *= jnp.sqrt(noise_image)
-    noise_batch = fourier_transform_utils.get_idft2(noise_batch_ft.reshape(images_batch_shape)).real
-    return noise_batch
-
-
-def make_noise_batch_from_rng_stream(
-    noise_subkeys,
-    noise_rng_batch_size,
-    batch_st,
-    batch_end,
-    n_images,
-    noise_image,
-    images_batch_shape,
-):
-    """Return noise for a processing batch from a fixed reference RNG stream.
-
-    The RNG stream is chunked by ``noise_rng_batch_size`` (independent
-    of the processing ``batch_size``). For a processing batch spanning
-    [batch_st, batch_end), pulls the corresponding pieces from one or
-    more RNG chunks and concatenates them. This decouples generated
-    noise from GPU-memory-driven processing-batch shape changes
-    (issue #148 fix).
-    """
-    if batch_end <= batch_st:
-        raise ValueError("batch_end must be greater than batch_st")
-
-    first_rng_batch = batch_st // noise_rng_batch_size
-    last_rng_batch = (batch_end - 1) // noise_rng_batch_size
-    image_shape = tuple(images_batch_shape[-2:])
-    pieces = []
-
-    for rng_batch_idx in range(first_rng_batch, last_rng_batch + 1):
-        rng_st = rng_batch_idx * noise_rng_batch_size
-        rng_end = min((rng_batch_idx + 1) * noise_rng_batch_size, n_images)
-        rng_shape = (rng_end - rng_st, *image_shape)
-        rng_noise = make_noise_batch(noise_subkeys[rng_batch_idx], noise_image, rng_shape)
-
-        slice_st = max(batch_st, rng_st) - rng_st
-        slice_end = min(batch_end, rng_end) - rng_st
-        pieces.append(rng_noise[slice_st:slice_end])
-
-    if len(pieces) == 1:
-        return pieces[0]
-    return jnp.concatenate(pieces, axis=0)
 
 
 # ============================================================================
