@@ -31,7 +31,7 @@ def make_test_dataset_from_PCs(
     #--------- Get voxel_size from input volumes
     # TODO: replace "volume_folder_input" below(folder with .mrcs), with a pipeline path, and get mean.mrc, and any number of pcs from an input pipeline, and let user pass it
     # TODO: just read out asset size from the volume size in the input volumes below
-    ogger.info("For now, hard coding what volumes are used, with no user choice, need to implement a possibility of loading from a pipeline instead")  
+    logger.info("For now, hard coding what volumes are used, with no user choice, need to implement a possibility of loading from a pipeline instead")  
     logger.info("For now, 128^3 size volumes!! Check if loading volumes that are 256, needs to be changed if so")  
     asset_size = 128  # Needs to be size of the asset volumes used! TODO: just read this out from the volume size in the input volumes below
     volume_folder_input = f"/mnt/home/levans/software/recovar/recovar/assets/PCA_example_10345_downsampled_{asset_size}"
