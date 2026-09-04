@@ -1228,6 +1228,7 @@ def generate_synthetic_dataset_mix_volumes(
     outlier_file_input=None,
     grid_size=128,
     latent_distribution=None,
+    image_assignments=None,
     dataset_params_option="dataset1",
     noise_level=1.0,
     noise_model="radial1",
@@ -1305,6 +1306,7 @@ def generate_synthetic_dataset_mix_volumes(
             latent_space_bounds,
             voxel_size,
             latent_distribution,
+            image_assignments,
             10000,
             noise_variance,
             noise_scale_std,
@@ -1327,8 +1329,8 @@ def generate_synthetic_dataset_mix_volumes(
         volumes = volumes / np.sqrt(norm_image)
         mean_volume = mean_volume / np.sqrt(norm_image)
         scale_vol = scale_vol / np.sqrt(norm_image)
-        logger.info("rescaling latent space bounds") 
-        latent_space_bounds *= scale_vol
+        #logger.info("rescaling latent space bounds") 
+        #latent_space_bounds *= scale_vol
 
     main_image_stack, ctf_params, rots, trans, simulation_info, voxel_size, tilt_groups = generate_simulated_dataset_mix_volumes(
         mean_volume, 
@@ -1336,6 +1338,7 @@ def generate_synthetic_dataset_mix_volumes(
         latent_space_bounds,
         voxel_size,
         latent_distribution,
+        image_assignments,
         n_images,
         noise_variance,
         noise_scale_std,
@@ -1423,6 +1426,7 @@ def generate_simulated_dataset_mix_volumes(
     latent_space_bounds,
     voxel_size,
     latent_distribution,
+    image_assignments,
     n_images,
     noise_variance,
     noise_scale_std,
@@ -1460,33 +1464,35 @@ def generate_simulated_dataset_mix_volumes(
     trans *= 0
     per_image_contrast, per_image_noise_scale = generate_contrast_params(n_images, noise_scale_std, contrast_std)
 
-    #----Changing from np choice to a prob distribution on R^d 
-    pca_dim = len(volumes) 
-    num_points_per_dim = None
-    if num_points_per_dim is None:
-        if pca_dim == 1:
-            num_points_per_dim = 500
-        elif pca_dim == 2:
-            num_points_per_dim = 200
-        elif pca_dim > 2:
-            num_points_per_dim = 50
+    #----OLD code: Changing from np choice for image assignments, to a prob distribution on R^d 
+    #----New code: the image assignments are preloaded
+    #pca_dim = len(volumes) 
+    #num_points_per_dim = None
+    #if num_points_per_dim is None:
+    #    if pca_dim == 1:
+    #        num_points_per_dim = 500
+    #    elif pca_dim == 2:
+    #        num_points_per_dim = 200
+    #    elif pca_dim > 2:
+    #        num_points_per_dim = 50
     
 
-    logger.info("For latent grid, transposing to match conventions used to make the input volume distribution") 
-    grids_flat = ld.make_latent_space_grid_from_bounds(latent_space_bounds, num_points_per_dim).astype(jnp.float32)
-    nodes = grids_flat.reshape(num_points_per_dim**pca_dim, grids_flat.shape[-1])
+    #logger.info("For latent grid, transposing to match conventions used to make the input volume distribution") 
+    #grids_flat = ld.make_latent_space_grid_from_bounds(latent_space_bounds, num_points_per_dim).astype(jnp.float32)
+    #nodes = grids_flat.reshape(num_points_per_dim**pca_dim, grids_flat.shape[-1])
 
-    seed = 8393939
-    choice_key = jax.random.key(seed)
+    #seed = 8393939
+    #choice_key = jax.random.key(seed)
 
-    # TODO: make sure volume-distribution in latent space has mean 0, maybe also has same variance as eigvals of covar
-    #latent_distribution_shifted = latent_distribution - jnp.mean(points*latent_distribution[:, None], axis=0)
+    ## TODO: make sure volume-distribution in latent space has mean 0, maybe also has same variance as eigvals of covar
+    ##latent_distribution_shifted = latent_distribution - jnp.mean(points*latent_distribution[:, None], axis=0)
 
-    # TODO: if it matters, instead of using jnp.choice, pass in continuous sampled latent image assignments, e.g from langevin from latent_distribution, with correct scaling
-    if latent_distribution is None:
-        logger.info("No latent distribution passed, so simulating from uniform distribution on latents")
-    image_assignments_indices = jax.random.choice(choice_key, jnp.arange(len(nodes)), shape=(n_images,), p=latent_distribution, mode="high").astype(int)
-    image_assignments = nodes[image_assignments_indices]
+    ## TODO: if it matters, instead of using jnp.choice, pass in continuous sampled latent image assignments, e.g from langevin from latent_distribution, with correct scaling
+    #if latent_distribution is None:
+    #    logger.info("No latent distribution passed, so simulating from uniform distribution on latents")
+    #image_assignments_indices = jax.random.choice(choice_key, jnp.arange(len(nodes)), shape=(n_images,), p=latent_distribution, mode="high").astype(int)
+    #image_assignments = nodes[image_assignments_indices]
+
 
     if n_tilts > 0:
         raise NotImplementedError("tilt series not supported yet for mix volume simulator")
@@ -1601,7 +1607,7 @@ def simulate_data_mix_volumes(
     )
 
     if mrc_file is None:
-        output_array = np.empty(
+        output_array = np.zeros(
             [experiment_dataset.n_images, *experiment_dataset.image_shape], dtype=experiment_dataset.dtype_real
         )
     else:

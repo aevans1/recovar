@@ -4,10 +4,14 @@ import logging
 import os
 
 import numpy as np
+import jax
+import jax.numpy as jnp
 import recovar.jax_config
+import equinox as eqx
 
 from recovar.output import output
 from recovar.simulation import simulator
+from recovar.heterogeneity import latent_density as ld
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +22,7 @@ def make_test_dataset_from_PCs(
     image_size=128,
     dataset_params_option="uniform",
     latent_distribution_path=None,
+    latent_distribution_params_option="two_channels",
     noise_level=0.1,
     noise_scale_std=0.0,
     contrast_std=0.0,
@@ -45,25 +50,57 @@ def make_test_dataset_from_PCs(
     #---------Define PC space bounds
     # using a prob distribution on R^d 
     # TODO: don't hardcode 2 volumes
-    # TODO: don't hardcode latent space bounds
     # TODO: don't hardcode num_poitns_per_dim, use code from elsewhere
     logger.info("For now, hardcoding dim=2 volumes")  
     logger.info("For now, hardcoding `latent space bounds'")  
     logger.info("For now, hardcoding num_points_per_dim=200, since hardcoding dim=2")  
     pca_dim = 2
-    #latent_space_bounds = ld.compute_latent_space_bounds(zs, percentile=1)
-    latent_space_bounds = np.array([[-1e3, 1e3], [-1e3, 1e3]])
+
+    logger.info("For now, loaded pipeline_dir is hardcoded as same dir as volume folder input, in future need to load this both from pipeline")
+    po = output.PipelineOutput(pipeline_dir)
+    zs_noreg = po.get_embedding_component('latent_coords_noreg', pca_dim)
+    latent_space_bounds = ld.compute_latent_space_bounds(zs_noreg, percentile=1)
+    print(latent_space_bounds)
+    logger.info(f"latent_space_bounds:{latent_space_bounds}")
 
     num_points_per_dim = 200
     num_nodes = num_points_per_dim**pca_dim
 
-    #---------Load Volume distribution
-    if latent_distribution_path is None:
-        latent_distribution = np.ones(num_nodes)/num_nodes
-        logger.info("using uniform distribution on latent space")
-    else:
-        latent_distribution = np.load(latent_distribution_path)
-        logger.info("using loaded latent distribution on latent space")
+    ##---------Simulate latent distribution and image assignments
+    if latent_distribution_params_option == "gaussian":
+        mean = jnp.zeros(2)
+        scale = 1/4  # empirically this makes it so that the PC deviations are 4 stds away
+        std = scale*(latent_space_bounds[:, 1] - latent_space_bounds[:, 0])/2
+        key = jax.random.key(29838)
+        image_assignments = jax.random.normal(key, shape=(n_images, std.shape[0])) * std + mean
+
+    elif latent_distribution_path == "two_channels":
+
+        def logdensity_fn(v, beta=1.0):
+            x = v[0] 
+            y = v[1]
+
+            exp1 = jnp.exp(-12*(x**2 + y**2)) 
+            exp2 = jnp.exp(-12*((x+0.5)**2 + y**2)) 
+            exp3 = jnp.exp(-12*((x-0.5)**2 + y**2)) 
+            poly1 = x**6
+            poly2 = y**6
+            U = 2*exp1 - exp2 - exp3 + poly1 + poly2
+            return -beta*U
+
+        image_assignments = simulate_image_assignments(latent_space_bounds, n_images, logdensity_fn)
+
+
+    #    #if latent_distribution_path is None:
+    ##    latent_distribution = np.ones(num_nodes)/num_nodes
+    ##    logger.info("using uniform distribution on latent space")
+    ##else:
+    ##    latent_distribution = np.load(latent_distribution_path)
+    ##    logger.info("using loaded latent distribution on latent space")
+    import matplotlib.pyplot as plt
+    plt.scatter(image_assignments[:, 0], image_assignments[:, 1], s=1.0)
+    plt.savefig("chhdhdhdhdhd.png", dpi=300)
+    plt.show()
 
     #---------Simulate
     simulator.generate_synthetic_dataset_mix_volumes(
@@ -74,7 +111,8 @@ def make_test_dataset_from_PCs(
          volumes_path_root=volume_folder_input,
          n_images=n_images,
          grid_size=grid_size,
-         latent_distribution=latent_distribution,
+         #latent_distribution=latent_distribution,
+         image_assignments=image_assignments,
          dataset_params_option=dataset_params_option,
          noise_level=noise_level,
          noise_model="radial1",
@@ -87,7 +125,36 @@ def make_test_dataset_from_PCs(
          disc_type="linear_interp",
      )
     logger.info("Finished generating dataset %s", output_folder)
-    
+
+def simulate_image_assignments(latent_space_bounds, n_images, logdensity_fn, beta):
+    rng_key = jax.random.key(32828282)
+    dt = 1e-4
+
+    run_langevin = _construct_langevin(logdensity_fn) 
+    image_assignments = run_langevin(rng_key, jnp.array([0., 0.]), beta, dt=dt, num_steps=int(n_images*100))
+    image_assignments = image_assignments[::100]
+    return image_assignments
+
+def _construct_langevin(logdensity_fn):
+
+    def langevin_step(key, x, beta, dt):
+            grad = jax.grad(lambda v: logdensity_fn(v, beta))(x)
+            noise = jax.random.normal(key, shape=x.shape)
+            return x + (1/beta)*grad * dt + jnp.sqrt(2 * dt / beta) * noise
+
+    @eqx.filter_jit
+    def run_langevin(key, x_init, beta, dt, num_steps):
+        def body(x, key):
+            key, subkey = jax.random.split(key)
+            x_update = langevin_step(subkey, x, beta, dt)
+            return x_update, x_update
+        keys = jax.random.split(key, num_steps) # make keys for all steps
+        _, states = jax.lax.scan(lambda x, k: body(x, k), x_init, keys)
+        return states
+
+    return run_langevin
+
+
 def build_parser():
     """Making a separate parser file so that it's easier to generate configs later"""
     
