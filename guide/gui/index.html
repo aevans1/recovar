@@ -2453,7 +2453,7 @@
 <p>Jobs submitted through the GUI are tracked in the project database. <strong>SLURM jobs</strong> run on the cluster independently of the GUI, so they keep going if the server restarts and are picked back up automatically. <strong>Local GPU jobs</strong> run as child processes of the server: the GUI reconciles their final status (completed or failed) when it restarts, but a local job that was still running when the server was killed will not resume.</p>
 <h2 id="requirements">Requirements<a class="headerlink" href="#requirements" title="Permanent link">&para;</a></h2>
 <p>The GUI requires FastAPI, uvicorn, SQLAlchemy, and a few other packages, which are all included when you install with:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;recovar[gui]&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"recovar[gui]"</span>
 </code></pre></div>
 <p>This installs the <code>gui</code> extra, which includes <code>fastapi</code>, <code>uvicorn</code>, <code>python-multipart</code>, <code>sqlalchemy</code>, <code>aiosqlite</code>, <code>aiofiles</code>, <code>jinja2</code>, and <code>tomli_w</code> (for writing TOML settings files).</p>
 <p>The frontend is pre-built and bundled -- no Node.js required at runtime.</p>

@@ -1892,12 +1892,12 @@
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nb">print</span><span class="p">(</span><span class="n">jax</span><span class="o">.</span><span class="n">devices</span><span class="p">())</span>  <span class="c1"># Should show CudaDevice</span>
 </code></pre></div>
 <p>If it shows only CPU devices, reinstall JAX with CUDA support:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;jax[cuda12]&quot;</span><span class="o">==</span><span class="m">0</span>.9.0.1
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"jax[cuda12]"</span><span class="o">==</span><span class="m">0</span>.9.0.1
 </code></pre></div>
 <h3 id="cuda-driver-version-mismatch">CUDA driver version mismatch<a class="headerlink" href="#cuda-driver-version-mismatch" title="Permanent link">&para;</a></h3>
 <p>If you get CUDA errors, ensure your driver version is compatible with the CUDA toolkit version used by JAX. Check with:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>nvidia-smi<span class="w">  </span><span class="c1"># Shows driver version</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>python<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;import jax; print(jax.lib.xla_bridge.get_backend().platform_version)&quot;</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>python<span class="w"> </span>-c<span class="w"> </span><span class="s2">"import jax; print(jax.lib.xla_bridge.get_backend().platform_version)"</span>
 </code></pre></div>
 
 

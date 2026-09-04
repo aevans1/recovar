@@ -4749,7 +4749,7 @@ be modified via <code>eqx.tree_at</code>.</p>
 
 
 <h4 id="recovar.core.configs.ForwardModelConfig.from_dataset" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">from_dataset</span><span class="p">(</span><span class="n">cryo</span><span class="p">,</span> <span class="n">disc_type</span><span class="o">=</span><span class="s1">&#39;linear_interp&#39;</span><span class="p">,</span> <span class="n">process_fn</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">upsampling_factor</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">from_dataset</span><span class="p">(</span><span class="n">cryo</span><span class="p">,</span> <span class="n">disc_type</span><span class="o">=</span><span class="s1">'linear_interp'</span><span class="p">,</span> <span class="n">process_fn</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">upsampling_factor</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
@@ -6248,7 +6248,7 @@ Defaults to <code>ceil(6 * N / 128)</code> where N is the grid size.</p>
 
 
 <h3 id="recovar.core.mask.make_mask" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">make_mask</span><span class="p">(</span><span class="n">volume</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">threshold</span><span class="o">=</span><span class="s1">&#39;auto&#39;</span><span class="p">,</span> <span class="n">lowpass_sigma</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">extend</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">soft_edge</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">cleanup</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">make_mask</span><span class="p">(</span><span class="n">volume</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">threshold</span><span class="o">=</span><span class="s1">'auto'</span><span class="p">,</span> <span class="n">lowpass_sigma</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">extend</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">soft_edge</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">cleanup</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></code>
 
 <a href="#recovar.core.mask.make_mask" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -6417,8 +6417,8 @@ component after thresholding (RELION does not do this).</p>
 <div class="highlight"><pre><span></span><code>import mrcfile
 from recovar.core.mask import make_mask
 
-h1 = mrcfile.open(&quot;half1.mrc&quot;).data
-h2 = mrcfile.open(&quot;half2.mrc&quot;).data
+h1 = mrcfile.open("half1.mrc").data
+h2 = mrcfile.open("half2.mrc").data
 avg = (h1 + h2) / 2.0
 
 # Automatic (recommended)
@@ -6438,7 +6438,7 @@ mask = make_mask(avg, threshold=0.02, extend=3, soft_edge=6,
 
 
 <h3 id="recovar.core.mask.make_mask_from_half_maps" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">make_mask_from_half_maps</span><span class="p">(</span><span class="n">halfmap1</span><span class="p">,</span> <span class="n">halfmap2</span><span class="p">,</span> <span class="n">smax</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">method</span><span class="o">=</span><span class="s1">&#39;auto&#39;</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">make_mask_from_half_maps</span><span class="p">(</span><span class="n">halfmap1</span><span class="p">,</span> <span class="n">halfmap2</span><span class="p">,</span> <span class="n">smax</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">method</span><span class="o">=</span><span class="s1">'auto'</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></code>
 
 <a href="#recovar.core.mask.make_mask_from_half_maps" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -8438,7 +8438,7 @@ the coefficients satisfy the same property.</p>
 
 
 <h3 id="recovar.core.cubic_interpolation.interpolate_with_spline" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">interpolate_with_spline</span><span class="p">(</span><span class="n">spline_coeffs</span><span class="p">,</span> <span class="n">coords</span><span class="p">,</span> <span class="n">boundary_mode</span><span class="o">=</span><span class="s1">&#39;wrap&#39;</span><span class="p">,</span> <span class="n">fill_value</span><span class="o">=</span><span class="mf">0.0</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">interpolate_with_spline</span><span class="p">(</span><span class="n">spline_coeffs</span><span class="p">,</span> <span class="n">coords</span><span class="p">,</span> <span class="n">boundary_mode</span><span class="o">=</span><span class="s1">'wrap'</span><span class="p">,</span> <span class="n">fill_value</span><span class="o">=</span><span class="mf">0.0</span><span class="p">)</span></code>
 
 <a href="#recovar.core.cubic_interpolation.interpolate_with_spline" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -8558,7 +8558,7 @@ the coefficients satisfy the same property.</p>
 
 
 <h3 id="recovar.core.cubic_interpolation.map_coordinates" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">map_coordinates</span><span class="p">(</span><span class="nb">input</span><span class="p">,</span> <span class="n">coordinates</span><span class="p">,</span> <span class="n">order</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s1">&#39;wrap&#39;</span><span class="p">,</span> <span class="n">cval</span><span class="o">=</span><span class="mf">0.0</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">map_coordinates</span><span class="p">(</span><span class="nb">input</span><span class="p">,</span> <span class="n">coordinates</span><span class="p">,</span> <span class="n">order</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s1">'wrap'</span><span class="p">,</span> <span class="n">cval</span><span class="o">=</span><span class="mf">0.0</span><span class="p">)</span></code>
 
 <a href="#recovar.core.cubic_interpolation.map_coordinates" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -8690,7 +8690,7 @@ Coordinates are shifted by -1 for periodic convention.</p>
 
 
 <h3 id="recovar.core.cubic_interpolation.map_coordinates_with_cubic_spline" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">map_coordinates_with_cubic_spline</span><span class="p">(</span><span class="n">coefficients</span><span class="p">,</span> <span class="n">coordinates</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s1">&#39;wrap&#39;</span><span class="p">,</span> <span class="n">cval</span><span class="o">=</span><span class="mf">0.0</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">map_coordinates_with_cubic_spline</span><span class="p">(</span><span class="n">coefficients</span><span class="p">,</span> <span class="n">coordinates</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s1">'wrap'</span><span class="p">,</span> <span class="n">cval</span><span class="o">=</span><span class="mf">0.0</span><span class="p">)</span></code>
 
 <a href="#recovar.core.cubic_interpolation.map_coordinates_with_cubic_spline" class="headerlink" title="Permanent link">&para;</a></h3>
 
