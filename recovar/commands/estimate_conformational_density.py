@@ -133,12 +133,18 @@ def estimate_conformational_density(
     deconvolve_density.plot_density(lbfgsb_sols, density, alphas, cbar_normalize=True)
     plt.savefig(str(plots_dir / "all_densities_cbar_normalize.png"))
     plt.close()
+    
 
     from kneed import KneeLocator
 
     kn = KneeLocator(np.log10(1 / alphas), np.log(cost), curve="convex", direction="decreasing")
     knee_idx = np.argmin(np.abs(np.log10(1 / alphas) - kn.knee))
     logger.info("Knee point: alpha = %.2e at idx = %d", alphas[knee_idx], knee_idx)
+
+    # Plot knee density by itself
+    deconvolve_density.plot_individual_density(lbfgsb_sols[knee_idx], "density knee")
+    plt.savefig(str(plots_dir / "density_knee.png"))
+
 
     all_densities_dir = data_dir / "all_densities"
     output.mkdir_safe(str(all_densities_dir))

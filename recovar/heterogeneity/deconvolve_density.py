@@ -223,6 +223,7 @@ def plot_density(lbfgsb_sols, density, alphas, function=None, cmap="inferno", cb
     print(len(lbfgsb_sols))
     for idx in range(len(lbfgsb_sols)):
         lbfgsb_sols[idx] /= jnp.sum(lbfgsb_sols[idx])
+    density /= jnp.sum(density)
 
     # Find vmin, vmax for colorbars
     vmin = jnp.min(jnp.stack(lbfgsb_sols))
@@ -245,9 +246,15 @@ def plot_density(lbfgsb_sols, density, alphas, function=None, cmap="inferno", cb
 
     matplotlib.rc("font", **font)
 
-    n_plots = len(lbfgsb_sols) + 1
-    n_cols = density.ndim + 1 if density.ndim < 2 else density.ndim
+    ndim = density.ndim
+    if ndim == 1:
+        n_cols = 1
+    else:
+        n_pairs = ndim - 1
+        n_extra = 1 if ndim > 2 else 0
+        n_cols = n_pairs + n_extra
 
+    n_plots = len(lbfgsb_sols) + 1
     fig, axs = plt.subplots(n_plots, n_cols, figsize=(n_cols * 5, n_plots * 5))
     global is_first
     is_first = True
