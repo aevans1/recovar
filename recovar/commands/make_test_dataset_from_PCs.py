@@ -6,9 +6,9 @@ import os
 import numpy as np
 import jax
 import jax.numpy as jnp
-import recovar.jax_config
 import equinox as eqx
-
+import matplotlib.pyplot as plt
+ 
 from recovar.output import output
 from recovar.simulation import simulator
 from recovar.heterogeneity import latent_density as ld
@@ -18,9 +18,11 @@ logger = logging.getLogger(__name__)
 
 def make_test_dataset_from_PCs(
     output_dir,
-    pipeline_dir,
+    pipeline_dir, # NOTE: this is passed in and hardcoded from a script right now, this really shouldn't be a parameter right now
+    asset_size=128,
     image_size=128,
     dataset_params_option="uniform",
+    latent_generation_option="samples",
     latent_distribution_path=None,
     latent_distribution_params_option="two_channels",
     noise_level=0.1,
@@ -33,13 +35,13 @@ def make_test_dataset_from_PCs(
         np.random.seed(seed)
     grid_size = image_size
 
-    #--------- Get voxel_size from input volumes
     # TODO: replace "volume_folder_input" below(folder with .mrcs), with a pipeline path, and get mean.mrc, and any number of pcs from an input pipeline, and let user pass it
-    # TODO: just read out asset size from the volume size in the input volumes below
+    #       Then, just read out asset size from the volume size in the input volumes below
     logger.info("For now, hard coding what volumes are used, with no user choice, need to implement a possibility of loading from a pipeline instead")  
-    logger.info("For now, 128^3 size volumes!! Check if loading volumes that are 256, needs to be changed if so")  
-    asset_size = 128  # Needs to be size of the asset volumes used! TODO: just read this out from the volume size in the input volumes below
-    volume_folder_input = f"/mnt/home/levans/software/recovar/recovar/assets/PCA_example_10345_downsampled_{asset_size}"
+    if asset_size == 128:
+        volume_folder_input = f"/mnt/home/levans/software/recovar/recovar/assets/PCA_example_10345_downsampled_{asset_size}"
+    elif asset_size == 256:
+        volume_folder_input = f"/mnt/home/levans/software/recovar/recovar/assets/PCA_example_10345"
     output_folder = os.path.join(output_dir, "test_dataset")
     output.mkdir_safe(output_folder)
     n_images = int(n_images)
@@ -49,8 +51,8 @@ def make_test_dataset_from_PCs(
 
     #---------Define PC space bounds
     # using a prob distribution on R^d 
-    # TODO: don't hardcode 2 volumes
-    # TODO: don't hardcode num_poitns_per_dim, use code from elsewhere
+    # TODO: don't hardcode 2 volumes, let it be variable
+    # TODO: don't hardcode num_points_per_dim, use code from elsewhere that determines
     logger.info("For now, hardcoding dim=2 volumes")  
     logger.info("For now, hardcoding `latent space bounds'")  
     logger.info("For now, hardcoding num_points_per_dim=200, since hardcoding dim=2")  
@@ -66,41 +68,69 @@ def make_test_dataset_from_PCs(
     num_points_per_dim = 200
     num_nodes = num_points_per_dim**pca_dim
 
-    ##---------Simulate latent distribution and image assignments
-    if latent_distribution_params_option == "gaussian":
-        mean = jnp.zeros(2)
-        scale = 1/4  # empirically this makes it so that the PC deviations are 4 stds away
-        std = scale*(latent_space_bounds[:, 1] - latent_space_bounds[:, 0])/2
-        key = jax.random.key(29838)
-        image_assignments = jax.random.normal(key, shape=(n_images, std.shape[0])) * std + mean
+    if latent_generation_option == "samples":
+        # "samples": gets the latents from sampling, for true "continuous" heterogeneity in the latent space
 
-    elif latent_distribution_path == "two_channels":
+        ##---------Simulate latent distribution and image assignments
+        if latent_distribution_params_option == "gaussian":
+            mean = jnp.zeros(2)
+            scale = 1/4  # empirically this makes it so that the PC deviations are 4 stds away
+            std = scale*(latent_space_bounds[:, 1] - latent_space_bounds[:, 0])/2
+            key = jax.random.key(29838)
+            image_assignments = jax.random.normal(key, shape=(n_images, std.shape[0])) * std + mean
 
-        def logdensity_fn(v, beta=1.0):
-            x = v[0] 
-            y = v[1]
+        elif latent_distribution_params_option == "two_channels":
+            # Simulate from langevin
 
-            exp1 = jnp.exp(-12*(x**2 + y**2)) 
-            exp2 = jnp.exp(-12*((x+0.5)**2 + y**2)) 
-            exp3 = jnp.exp(-12*((x-0.5)**2 + y**2)) 
-            poly1 = x**6
-            poly2 = y**6
-            U = 2*exp1 - exp2 - exp3 + poly1 + poly2
-            return -beta*U
+            def logdensity_fn(v, beta=1.0):
+                x = v[0]
+                y = v[1]
 
-        image_assignments = simulate_image_assignments(latent_space_bounds, n_images, logdensity_fn)
+                exp1 = jnp.exp(-12*(x**2 + y**2)) 
+                exp2 = jnp.exp(-12*((x+0.5)**2 + y**2)) 
+                exp3 = jnp.exp(-12*((x-0.5)**2 + y**2)) 
+                poly1 = x**6
+                poly2 = y**6
+                U = 2*exp1 - exp2 - exp3 + poly1 + poly2
+                return -beta*U
+
+            image_assignments = simulate_image_assignments(n_images, logdensity_fn, beta=1.0)
+
+        # scale image assignments to have roughly same bounds as the original zs 
+        bounds_image_assignments = ld.compute_latent_space_bounds(image_assignments, percentile=1)
+        rescale = (latent_space_bounds[:, 1] - latent_space_bounds[:, 0]) / (bounds_image_assignments[:, 1] - bounds_image_assignments[:, 0]) 
+        image_assignments = rescale * image_assignments 
+        bounds_image_assignments = ld.compute_latent_space_bounds(image_assignments, percentile=1)
+        logger.info(bounds_image_assignments)
+        logger.info(latent_space_bounds)
+
+    elif latent_generation_option == "grid":
+        # "grid": samples the latents on the same grid, roughly, that will be used for estimating the density. essentially a histogram
+        
+        if latent_distribution_path is None:
+            latent_distribution = np.ones(num_nodes)/num_nodes
+            logger.info("using uniform distribution on latent space")
+        else:
+            latent_distribution = np.load(latent_distribution_path)
+            logger.info("using loaded latent distribution on latent space")
 
 
-    #    #if latent_distribution_path is None:
-    ##    latent_distribution = np.ones(num_nodes)/num_nodes
-    ##    logger.info("using uniform distribution on latent space")
-    ##else:
-    ##    latent_distribution = np.load(latent_distribution_path)
-    ##    logger.info("using loaded latent distribution on latent space")
-    import matplotlib.pyplot as plt
+        pca_dim = 2
+        num_points_per_dim = 200
+        
+        logger.info("For latent grid, transposing to match conventions used to make the input volume distribution") 
+        grids_flat = ld.make_latent_space_grid_from_bounds(latent_space_bounds, num_points_per_dim).astype(jnp.float32)
+        nodes = grids_flat.reshape(num_points_per_dim**pca_dim, grids_flat.shape[-1])
+
+        seed = 8393939
+        choice_key = jax.random.key(seed)
+
+        image_assignments_indices = jax.random.choice(choice_key, jnp.arange(len(nodes)), shape=(n_images,), p=latent_distribution, mode="high").astype(int)
+        image_assignments = nodes[image_assignments_indices]
+
+
     plt.scatter(image_assignments[:, 0], image_assignments[:, 1], s=1.0)
-    plt.savefig("chhdhdhdhdhd.png", dpi=300)
-    plt.show()
+    plt.savefig(f"checking_initial_assignments_{latent_generation_option}.png", dpi=300)
 
     #---------Simulate
     simulator.generate_synthetic_dataset_mix_volumes(
@@ -126,12 +156,14 @@ def make_test_dataset_from_PCs(
      )
     logger.info("Finished generating dataset %s", output_folder)
 
-def simulate_image_assignments(latent_space_bounds, n_images, logdensity_fn, beta):
+def simulate_image_assignments(n_images, logdensity_fn, beta):
     rng_key = jax.random.key(32828282)
-    dt = 1e-4
+    dt = jnp.float32(1e-3)
+    beta = jnp.float32(beta)
 
     run_langevin = _construct_langevin(logdensity_fn) 
-    image_assignments = run_langevin(rng_key, jnp.array([0., 0.]), beta, dt=dt, num_steps=int(n_images*100))
+    x_init = jnp.zeros(2, dtype=jnp.float32)
+    image_assignments = run_langevin(rng_key, x_init, beta, dt=dt, num_steps=int(n_images*100))
     image_assignments = image_assignments[::100]
     return image_assignments
 
@@ -139,7 +171,8 @@ def _construct_langevin(logdensity_fn):
 
     def langevin_step(key, x, beta, dt):
             grad = jax.grad(lambda v: logdensity_fn(v, beta))(x)
-            noise = jax.random.normal(key, shape=x.shape)
+            assert grad.dtype == jnp.float32, grad.dtype # We need everything here to be float32, so checking if the logdensity puts that in somewhere
+            noise = jax.random.normal(key, shape=x.shape, dtype=jnp.float32)
             return x + (1/beta)*grad * dt + jnp.sqrt(2 * dt / beta) * noise
 
     @eqx.filter_jit
@@ -162,8 +195,10 @@ def build_parser():
     parser.add_argument("output_dir", nargs="?", default=os.getcwd(), help="Output directory for the test dataset")
     parser.add_argument("--pipeline-dir", type=str, default="", help="pipeline directory with a better explanation later")
     parser.add_argument("--noise-level", type=float, default=0.1, help="Noise level for the dataset")
+    parser.add_argument("--asset-size", type=int, help="Voxel size of assets used to generate")
     parser.add_argument("--n-images", type=int, help="Number of images to generate")
     parser.add_argument("--image-size", type=int, default=64, help="Image size (default: 64 for 64x64 images)")
+    parser.add_argument("--latent-generation-option", type=str, default="samples", help="how to generate the latent vectors")
     parser.add_argument("--latent-distribution-path", default=None, help="path to a volume distribution probability vector")
     parser.add_argument(
         "--volume-input", default=None, help="Optional input volume prefix (e.g. /path/to/vol for vol0000.mrc, ...)"
@@ -182,8 +217,10 @@ def main():
     make_test_dataset_from_PCs(
         output_dir=args.output_dir,
         pipeline_dir=args.pipeline_dir,
+        asset_size=args.asset_size,
         image_size=args.image_size,
         dataset_params_option=args.dataset_params_option,
+        latent_generation_option=args.latent_generation_option,
         latent_distribution_path=args.latent_distribution_path,
         noise_level=args.noise_level,
         noise_scale_std=args.noise_scale_std, 
