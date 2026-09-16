@@ -24,6 +24,7 @@ import logging
 import os
 import pathlib
 import subprocess
+import tempfile
 import threading
 from contextlib import contextmanager
 from types import ModuleType
@@ -63,21 +64,98 @@ def _env_flag(name: str) -> bool:
 
 
 def custom_cuda_requested() -> bool:
-    """Return True unless the user explicitly disables custom CUDA."""
-    return not _env_flag(_DISABLE_CUSTOM_CUDA_ENV)
+    """Return True unless the user explicitly disables custom CUDA.
+
+    Routes through ``recovar.utils.cuda_env`` so the codebase reads the
+    canonical ``RECOVAR_DISABLE_CUDA`` env var in one place.
+    """
+    from recovar.utils.cuda_env import custom_cuda_disabled_from_env
+
+    disabled, _ = custom_cuda_disabled_from_env()
+    return not disabled
+
+
+_CACHE_ROOT_FALLBACK_WARNED = False
+
+
+def _path_is_writable(path: pathlib.Path) -> bool:
+    """Return True iff *path* exists or can be created and a tiny file
+    written and unlinked there.
+
+    Used to gate fallbacks in :func:`_cache_root` when the user's
+    ``XDG_CACHE_HOME`` (or ``$HOME``) points at a directory that exists
+    but cannot be written to — e.g. issue #136 where ``XDG_CACHE_HOME``
+    resolves to ``/home/levans`` but the real home is ``/mnt/home/levans``.
+    """
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except (PermissionError, OSError):
+        return False
+    probe = path / ".recovar_write_test"
+    try:
+        probe.write_text("ok")
+    except (PermissionError, OSError):
+        return False
+    try:
+        probe.unlink()
+    except (PermissionError, OSError):
+        return False
+    return True
+
+
+def _warn_cache_root_fallback(rejected: list[tuple[str, pathlib.Path]], chosen: pathlib.Path) -> None:
+    parts = ", ".join(f"{label}={path}" for label, path in rejected)
+    logger.warning(
+        "RECOVAR cuda cache: %s is not writable, falling back to %s. Set %s to silence this warning.",
+        parts,
+        chosen,
+        _CUDA_CACHE_DIR_ENV,
+    )
 
 
 def _cache_root() -> pathlib.Path:
+    """Pick a writable cache directory for the CUDA shared library.
+
+    Resolution order, each step gated on writability (except the
+    explicit override):
+
+    1. ``RECOVAR_CUDA_CACHE_DIR`` — explicit override, returned as-is.
+    2. ``$XDG_CACHE_HOME/recovar/cuda``
+    3. ``~/.cache/recovar/cuda``
+    4. ``tempfile.gettempdir()/recovar_cuda_cache/cuda`` — last-resort
+       fallback when neither of the above is writable. Logs a WARNING.
+
+    Steps 2 and 3 each attempt ``mkdir(parents=True, exist_ok=True)``
+    plus a tiny probe-file write and delete. ``PermissionError`` and
+    ``OSError`` are caught and trigger a fall-through to the next
+    candidate.
+    """
+    global _CACHE_ROOT_FALLBACK_WARNED
+
     override = os.environ.get(_CUDA_CACHE_DIR_ENV)
     if override:
         return pathlib.Path(override).expanduser()
 
-    # Lukes hotfix for a path issue here!
-    #xdg_cache_home = os.environ.get("XDG_CACHE_HOME")
-    #if xdg_cache_home:
-    #    return pathlib.Path(xdg_cache_home).expanduser() / "recovar" / "cuda"
+    candidates: list[tuple[str, pathlib.Path]] = []
+    xdg_cache_home = os.environ.get("XDG_CACHE_HOME")
+    if xdg_cache_home:
+        candidates.append(("XDG_CACHE_HOME", pathlib.Path(xdg_cache_home).expanduser() / "recovar" / "cuda"))
+    candidates.append(("HOME", pathlib.Path.home().expanduser() / ".cache" / "recovar" / "cuda"))
 
-    return pathlib.Path.home().expanduser() / ".cache" / "recovar" / "cuda"
+    rejected: list[tuple[str, pathlib.Path]] = []
+    for label, path in candidates:
+        if _path_is_writable(path):
+            if rejected and not _CACHE_ROOT_FALLBACK_WARNED:
+                _warn_cache_root_fallback(rejected, path)
+                _CACHE_ROOT_FALLBACK_WARNED = True
+            return path
+        rejected.append((label, path))
+
+    fallback = pathlib.Path(tempfile.gettempdir()) / "recovar_cuda_cache" / "cuda"
+    if not _CACHE_ROOT_FALLBACK_WARNED:
+        _warn_cache_root_fallback(rejected, fallback)
+        _CACHE_ROOT_FALLBACK_WARNED = True
+    return fallback
 
 
 def _cached_lib_path() -> pathlib.Path:
@@ -102,9 +180,38 @@ def _candidate_lib_paths() -> list[pathlib.Path]:
     return candidates
 
 
+def _lib_is_stale(lib_path: pathlib.Path) -> bool:
+    """Return True if the lib's mtime is older than the source files.
+
+    Catches the case where a user installed before a kernel/Makefile fix
+    landed (e.g. issue #131's Blackwell widening): without this check,
+    `_existing_lib_path()` would happily return the stale cached `.so`
+    forever, and the user would never pick up the new arch coverage.
+    """
+    try:
+        lib_mtime = lib_path.stat().st_mtime
+    except OSError:
+        return False
+    for src_name in ("cuda_backproject.cu", "Makefile"):
+        src = _LIB_DIR / src_name
+        try:
+            if src.stat().st_mtime > lib_mtime:
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def _existing_lib_path() -> pathlib.Path | None:
     for candidate in _candidate_lib_paths():
         if candidate.exists():
+            if _lib_is_stale(candidate):
+                logger.info(
+                    "RECOVAR CUDA library %s is older than its source — "
+                    "will rebuild (this happens once after a kernel/Makefile update).",
+                    candidate,
+                )
+                continue
             return candidate.resolve()
     return None
 
@@ -140,16 +247,22 @@ def build_custom_cuda(output_path: str | os.PathLike[str] | None = None, force: 
     global _auto_build_attempted, _auto_build_error, _cuda_ok, _ffi_registered, _lib_handle, _loaded_lib_path
 
     lib_path = pathlib.Path(output_path).expanduser().resolve() if output_path else _default_build_lib_path()
-    if lib_path.exists() and not force:
+    stale = lib_path.exists() and _lib_is_stale(lib_path)
+    if lib_path.exists() and not force and not stale:
         logger.info("Using existing RECOVAR CUDA extension at %s", lib_path)
         _auto_build_attempted = True
         _auto_build_error = None
         return lib_path
+    if stale:
+        logger.info(
+            "RECOVAR CUDA extension at %s is older than its source — rebuilding.",
+            lib_path,
+        )
 
     lib_path.parent.mkdir(parents=True, exist_ok=True)
     logger.info("Building %s", lib_path)
     make_cmd = ["make"]
-    if force:
+    if force or stale:
         make_cmd.append("-B")
     make_cmd.extend(["-C", str(_LIB_DIR), f"PYTHON={sys.executable}", f"LIB={lib_path}"])
     subprocess.check_call(make_cmd)
@@ -278,7 +391,9 @@ def _detect_gpu_compute_cap() -> tuple[str, str] | None:
     try:
         result = subprocess.run(
             ["nvidia-smi", "--query-gpu=name,compute_cap", "--format=csv,noheader"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if result.returncode == 0:
             line = result.stdout.strip().split("\n")[0]
@@ -299,10 +414,13 @@ def _detect_so_arches(so_path: pathlib.Path) -> tuple[set[str], set[str]]:
     try:
         result = subprocess.run(
             ["cuobjdump", "--list-elf", str(so_path)],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         if result.returncode == 0:
             import re
+
             for line in result.stdout.splitlines():
                 m = re.search(r"sm_(\d+)", line)
                 if m:
@@ -310,10 +428,13 @@ def _detect_so_arches(so_path: pathlib.Path) -> tuple[set[str], set[str]]:
         # Also check for PTX
         result2 = subprocess.run(
             ["cuobjdump", "--list-ptx", str(so_path)],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         if result2.returncode == 0:
             import re
+
             for line in result2.stdout.splitlines():
                 m = re.search(r"sm_(\d+)", line)
                 if m:
@@ -327,10 +448,14 @@ def _detect_nvcc_version() -> str | None:
     """Return nvcc version string like '12.8.93' or None."""
     try:
         result = subprocess.run(
-            ["nvcc", "--version"], capture_output=True, text=True, timeout=5,
+            ["nvcc", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if result.returncode == 0:
             import re
+
             m = re.search(r"release (\d+\.\d+)", result.stdout)
             if m:
                 return m.group(1)
@@ -386,11 +511,7 @@ def _preflight_check(so_path: pathlib.Path) -> None:
     makefile_dir = str(_LIB_DIR)
     makefile_path = str(_LIB_DIR / "Makefile")
     so_arches_str = ", ".join(f"sm_{a}" for a in sorted(sass_arches))
-    ptx_desc = (
-        f"targets {', '.join(f'sm_{p}' for p in sorted(ptx_arches))} or higher only"
-        if ptx_arches
-        else "none"
-    )
+    ptx_desc = f"targets {', '.join(f'sm_{p}' for p in sorted(ptx_arches))} or higher only" if ptx_arches else "none"
 
     msg = f"""\
 recovar's custom CUDA kernel cannot run on your GPU.
@@ -487,7 +608,7 @@ def cuda_available() -> bool:
     if _cuda_ok is not None:
         return _cuda_ok
 
-    if _env_flag(_DISABLE_CUSTOM_CUDA_ENV):
+    if not custom_cuda_requested():
         _cuda_ok = False
         logger.info("CUDA kernels disabled via %s", _DISABLE_CUSTOM_CUDA_ENV)
         return _cuda_ok
