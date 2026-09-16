@@ -2,11 +2,11 @@
 
 RECOVAR analyzes conformational heterogeneity in cryo-EM and cryo-ET datasets. It reconstructs volumes, estimates conformational density in latent space, and identifies the image subsets associated with specific volume features.
 
-**[Full Documentation](https://ma-gilles.github.io/recovar)** | **[Paper](https://www.pnas.org/doi/abs/10.1073/pnas.2419140122)** | **[Talk](https://www.youtube.com/watch?v=cQBQlCCRp8Q&t=740s)**
+**[Full Documentation](https://ma-gilles.github.io/recovar)** | **[Paper](https://www.pnas.org/doi/abs/10.1073/pnas.2419140122)**
 
 > **Looking for the older release?** Active development happens on the `dev` branch. If you want the previous stable release (`0.4.5`, possibly more stable but missing recent features like `.cs`/`.star` auto-extraction), install with `pip install recovar==0.4.5` or check out the [`legacy-0.4.5`](https://github.com/ma-gilles/recovar/tree/legacy-0.4.5) branch.
 
-**License**: the code has been modified and is now under the PU-RL v2.0 license, and the code imports libraries that are under non-PU-RL v2.0 (including GPL) licenses. See [LICENSE](LICENSE).
+**License**: the code has been modified and is now under the PU-RL v2.0 license, and the code imports libraries that are under non-PU-RL v2.0 (including GPL) licenses. See [LICENSE](https://github.com/ma-gilles/recovar/blob/dev/LICENSE).
 
 ## Key features
 
