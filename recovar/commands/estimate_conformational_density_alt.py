@@ -56,13 +56,13 @@ def parse_args():
     parser.add_argument(
         "--tol",
         type=float,
-        default=1e-6,
+        default=1e-4,
         help="Sets stopping tolerance for density estimation."   
     )
     parser.add_argument(
         "--max_iterations",
         type=int,
-        default=1000,
+        default=100,
         help="Sets max number of iterations for density estimation."   
     )
     parser.add_argument(
@@ -173,7 +173,7 @@ def estimate_conformational_density_alt(
         str(data_dir / "deconv_density_alt_gap.pkl"),
     )
 
-    calibrate_density.plot_density(weights_gap, plots_dir=plots_dir, cbar_normalize=False)
+    calibrate_density.plot_density(weights_gap, plots_dir=plots_dir, cbar_normalize=False, row_labels=[f"iteration {idx_weights_gap}"])
     calibrate_density.plot_density(weights_all, plots_dir=plots_dir, row_labels=row_labels, cbar_normalize=False)
     calibrate_density.plot_info(losses, gaps, plots_dir=plots_dir)
     plt.close()
