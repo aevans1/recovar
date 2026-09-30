@@ -1220,7 +1220,6 @@ def make_noise_batch_from_rng_stream(
 # ============================================================================
 def generate_synthetic_dataset_mix_volumes(
     output_folder,
-    pipeline_dir,
     latent_space_bounds,
     voxel_size,
     volumes_path_root,

@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 def make_test_dataset_from_PCs(
     output_dir,
-    pipeline_dir, # NOTE: this is passed in and hardcoded from a script right now, this really shouldn't be a parameter right now
+    pipeline_dir=None, 
     asset_size=128,
     image_size=128,
     dataset_params_option="uniform",
@@ -35,13 +35,20 @@ def make_test_dataset_from_PCs(
         np.random.seed(seed)
     grid_size = image_size
 
-    # TODO: replace "volume_folder_input" below(folder with .mrcs), with a pipeline path, and get mean.mrc, and any number of pcs from an input pipeline, and let user pass it
-    #       Then, just read out asset size from the volume size in the input volumes below
-    logger.info("For now, hard coding what volumes are used, with no user choice, need to implement a possibility of loading from a pipeline instead")  
-    if asset_size == 128:
-        volume_folder_input = f"/mnt/home/levans/software/recovar/recovar/assets/PCA_example_10345_downsampled_{asset_size}"
-    elif asset_size == 256:
-        volume_folder_input = f"/mnt/home/levans/software/recovar/recovar/assets/PCA_example_10345"
+    if pipeline_dir is None:
+        ## Load everything from pre-computed assets, PCs from empiar 10345, and load pipeline for getting latent zs
+        if asset_size == 128:
+            volume_folder_input = f"/mnt/home/levans/software/recovar/recovar/assets/PCA_example_10345_downsampled_128"
+            pipeline_dir = "/mnt/home/levans/ceph/recovar_testing/recovar_on_recovar_datasets/10345_downsampled_128"
+        elif asset_size == 256:
+            volume_folder_input = f"/mnt/home/levans/software/recovar/recovar/assets/PCA_example_10345"
+            pipeline_dir = "/mnt/home/levans/ceph/recovar_testing/recovar_on_recovar_datasets/10345"
+
+    else:
+        # TODO: replace "volume_folder_input" below(folder with .mrcs), with a pipeline path, and get mean.mrc, and any number of pcs from an input pipeline, and let user pass it
+        #       Then, just read out asset size from the volume size in the input volumes below
+        raise NotImplementedError("Custom pipelines, with pcs to simulate from...not implemented yet")
+
     output_folder = os.path.join(output_dir, "test_dataset")
     output.mkdir_safe(output_folder)
     n_images = int(n_images)
@@ -50,20 +57,18 @@ def make_test_dataset_from_PCs(
     voxel_size = 4.25 * asset_size / grid_size
 
     #---------Define PC space bounds
-    # using a prob distribution on R^d 
     # TODO: don't hardcode 2 volumes, let it be variable
-    # TODO: don't hardcode num_points_per_dim, use code from elsewhere that determines
+    # TODO: don't hardcode num_points_per_dim, use code from elsewhere that determines this
     logger.info("For now, hardcoding dim=2 volumes")  
     logger.info("For now, hardcoding `latent space bounds'")  
-    logger.info("For now, hardcoding num_points_per_dim=200, since hardcoding dim=2")  
+    logger.info("For now, hardcoding num_points_per_dim=200, since hardcoding dim=2, and 200 is standard elsewhere in library")  
     pca_dim = 2
 
     logger.info("For now, loaded pipeline_dir is hardcoded as same dir as volume folder input, in future need to load this both from pipeline")
     po = output.PipelineOutput(pipeline_dir)
     zs_noreg = po.get_embedding_component('latent_coords_noreg', pca_dim)
     latent_space_bounds = ld.compute_latent_space_bounds(zs_noreg, percentile=1)
-    print(latent_space_bounds)
-    logger.info(f"latent_space_bounds:{latent_space_bounds}")
+    logger.info(f"original pipeline latent_space_bounds:{latent_space_bounds}")
 
     num_points_per_dim = 200
     num_nodes = num_points_per_dim**pca_dim
@@ -135,13 +140,11 @@ def make_test_dataset_from_PCs(
     #---------Simulate
     simulator.generate_synthetic_dataset_mix_volumes(
          output_folder=output_folder,
-         pipeline_dir=pipeline_dir,
          latent_space_bounds=latent_space_bounds,
          voxel_size=voxel_size,
          volumes_path_root=volume_folder_input,
          n_images=n_images,
          grid_size=grid_size,
-         #latent_distribution=latent_distribution,
          image_assignments=image_assignments,
          dataset_params_option=dataset_params_option,
          noise_level=noise_level,
@@ -193,7 +196,7 @@ def build_parser():
     
     parser = argparse.ArgumentParser(description="Generate a test dataset for recovar")
     parser.add_argument("output_dir", nargs="?", default=os.getcwd(), help="Output directory for the test dataset")
-    parser.add_argument("--pipeline-dir", type=str, default="", help="pipeline directory with a better explanation later")
+    parser.add_argument("--pipeline-dir", default=None, help="pipeline directory with a better explanation later")
     parser.add_argument("--noise-level", type=float, default=0.1, help="Noise level for the dataset")
     parser.add_argument("--asset-size", type=int, help="Voxel size of assets used to generate")
     parser.add_argument("--n-images", type=int, help="Number of images to generate")
