@@ -582,6 +582,32 @@ def load_volumes_from_folder(volumes_path_root, grid_size, trailing_zero_format_
         volumes /= np.mean(np.linalg.norm(volumes, axis=(-1)))
     return volumes
 
+def load_volumes_from_pipeline(pipeline_dir, grid_size, n_pcs=2):
+    """Load mean and top PCs from a pipeline as centered Fourier-space volumes.
+
+    Returns
+    -------
+    mean_volume : (1, N) complex64
+    volumes : (n_pcs, N) complex64
+    voxel_size : float
+    """
+    from recovar.output import output
+
+    po = output.PipelineOutput(pipeline_dir)
+    volume_shape = tuple(int(s) for s in po.get("volume_shape"))
+    if volume_shape != (grid_size,) * 3:
+        raise ValueError(
+            f"pipeline volume_shape {volume_shape} does not match grid_size={grid_size}. "
+            "Resizing is not supported; use a pipeline run at the simulation grid size."
+        )
+    volumes = np.array(po.get_u(n_pcs=n_pcs), dtype=np.complex64)  # (n_pcs, N), Fourier
+    if volumes.shape[0] != n_pcs:
+        raise ValueError(
+            f"Requested n_pcs={n_pcs} but source pipeline '{pipeline_dir}' provided "
+            f"only {volumes.shape[0]} saved eigenvectors."
+        )
+    mean_volume = np.array(po.get("mean"), dtype=np.complex64).reshape(1, -1)  # (1, N), Fourier
+    return mean_volume, volumes, float(po.get("voxel_size"))
 
 
 def generate_simulated_dataset(
@@ -1222,10 +1248,11 @@ def generate_synthetic_dataset_mix_volumes(
     output_folder,
     latent_space_bounds,
     voxel_size,
-    volumes_path_root,
+    source_pipeline_dir, 
     n_images,
     outlier_file_input=None,
     grid_size=128,
+    n_pcs=2,
     latent_distribution=None,
     image_assignments=None,
     dataset_params_option="dataset1",
@@ -1261,29 +1288,21 @@ def generate_synthetic_dataset_mix_volumes(
     from recovar.output import output
 
     output.mkdir_safe(output_folder)
-    logger.info("Hard coding volume names")
-    mean_volume, voxel_size = generate_volumes_from_mrcs([volumes_path_root + "/" + "mean.mrc"], grid_size, padding=0)
-    volumes = load_volumes_from_folder(volumes_path_root+"/", grid_size, trailing_zero_format_in_vol_name, normalize=False)
+    #logger.info("Hard coding volume names")
+    #mean_volume, voxel_size = generate_volumes_from_mrcs([volumes_path_root + "/" + "mean.mrc"], grid_size, padding=0)
+    # TODO: this function barely avoids loading the mean volume due to naming convention of mean.mrc, needs to be corrected
+    #volumes = load_volumes_from_folder(volumes_path_root+"/", grid_size, trailing_zero_format_in_vol_name, normalize=False)
 
-    #----Here loading these up because I think we will need them later... ----
-    # TODO: load the volumes in from a pipeline and then downsample 
-    #logger.info("Loading up mean and u's from some piplein")
-    #logger.info("Note: for now, gridsize of simulation has to match that of the pipeline load stuff. in future these will be downsampled if needed")
-    #po = output.PipelineOutput(pipeline_dir)
-    #volumes = po.get_u_real(n_pcs=2)
-    #mean = po.get("mean")
-    #mean_volume = utils.load_mrc(po.paths.mean_volume)
-    #s = po.get("s")[:2]
-    #zs, _, _, _ = embedding.get_per_image_embedding(
-    #    po.get("mean"), u, s, n_pcs, dataset, po.get("volume_mask", utils.get_gpu_memory_total())
-    #)
-
+    logger.info("Loading up mean and u's from some pipline")
+    logger.info("Note: for now, gridsize of simulation has to match that of the pipeline load stuff. in future these will be downsampled if needed")
+    mean_volume, pc_volumes, voxel_size = load_volumes_from_pipeline(source_pipeline_dir, grid_size, n_pcs=n_pcs)  
+    
     logger.info("getting mean of volumes and mean_volume to divide by their norm, hacky for now.") 
-    all_volumes = jnp.vstack([volumes, mean_volume.flatten()[None, :]])
-    scale_vol = 1 / np.mean(np.linalg.norm(all_volumes, axis=(-1)))
-    volumes *= scale_vol
-    mean_volume *= scale_vol
+    all_volumes = np.vstack([pc_volumes, mean_volume])
 
+    scale_vol = 1 / np.mean(np.linalg.norm(all_volumes, axis=-1))
+    pc_volumes = pc_volumes * scale_vol
+    mean_volume = mean_volume * scale_vol
     outlier_volume = (
         fourier_transform_utils.get_dft3(utils.load_mrc(outlier_file_input)).reshape(-1)
         if outlier_file_input is not None
@@ -1295,13 +1314,13 @@ def generate_synthetic_dataset_mix_volumes(
 
     mrc_file = None
 
-    logger.info("Doing noise rescaling in mixture volumes with lots of images, to prevent 0 norms?")
+    #logger.info("Doing noise rescaling in mixture volumes with lots of images, to prevent 0 norms?")
     rescale_noise = True
     if rescale_noise:
         # Dont use premultiplied_ctf for
         main_image_stack, ctf_params, rots, trans, simulation_info, voxel_size, _ = generate_simulated_dataset_mix_volumes(
             mean_volume,
-            volumes,
+            pc_volumes,
             latent_space_bounds,
             voxel_size,
             latent_distribution,
@@ -1323,17 +1342,14 @@ def generate_synthetic_dataset_mix_volumes(
         )
         norm_image_square = np.mean(main_image_stack**2)
         norm_image = norm_image_square
-
         noise_variance = noise_variance / (norm_image)
-        volumes = volumes / np.sqrt(norm_image)
+        pc_volumes = pc_volumes / np.sqrt(norm_image)
         mean_volume = mean_volume / np.sqrt(norm_image)
         scale_vol = scale_vol / np.sqrt(norm_image)
-        #logger.info("rescaling latent space bounds") 
-        #latent_space_bounds *= scale_vol
 
     main_image_stack, ctf_params, rots, trans, simulation_info, voxel_size, tilt_groups = generate_simulated_dataset_mix_volumes(
         mean_volume, 
-        volumes,
+        pc_volumes,
         latent_space_bounds,
         voxel_size,
         latent_distribution,
@@ -1363,8 +1379,7 @@ def generate_synthetic_dataset_mix_volumes(
     # Add additional simulation parameters that weren't set in generate_simulated_dataset
     additional_params = {
         # Volume parameters
-        "volumes_path_root": volumes_path_root,
-        "trailing_zero_format_in_vol_name": trailing_zero_format_in_vol_name,
+        "source_pipeline_dir": source_pipeline_dir,
         "scale_vol": scale_vol,
         # Dataset parameters
         "grid_size": grid_size,
@@ -1421,7 +1436,7 @@ def generate_synthetic_dataset_mix_volumes(
 
 def generate_simulated_dataset_mix_volumes(
     mean_volume, 
-    volumes,
+    pc_volumes,
     latent_space_bounds,
     voxel_size,
     latent_distribution,
@@ -1449,7 +1464,7 @@ def generate_simulated_dataset_mix_volumes(
     noise_rng_batch_size=None,
 ):
 
-    volume_shape = utils.guess_vol_shape_from_vol_size(volumes[0].size)
+    volume_shape = utils.guess_vol_shape_from_vol_size(pc_volumes[0].size)
     grid_size = volume_shape[0]
 
     ctf_params, rots, trans = dataset_param_generator(n_images, grid_size)
@@ -1465,7 +1480,7 @@ def generate_simulated_dataset_mix_volumes(
 
     #----OLD code: Changing from np choice for image assignments, to a prob distribution on R^d 
     #----New code: the image assignments are preloaded
-    #pca_dim = len(volumes) 
+    #pca_dim = len(pc_volumes) 
     #num_points_per_dim = None
     #if num_points_per_dim is None:
     #    if pca_dim == 1:
@@ -1524,7 +1539,7 @@ def generate_simulated_dataset_mix_volumes(
     main_image_stack = simulate_data_mix_volumes(
         main_dataset,
         mean_volume,
-        volumes,
+        pc_volumes,
         noise_variance,
         batch_size,
         image_assignments,
@@ -1579,7 +1594,7 @@ def generate_simulated_dataset_mix_volumes(
 def simulate_data_mix_volumes( 
     experiment_dataset,
     mean_volume,
-    volumes,
+    pc_volumes,
     noise_variance,
     batch_size,
     image_assignments,
@@ -1630,10 +1645,10 @@ def simulate_data_mix_volumes(
 
     #----Here, making sure mean volume is index num_vols of 0,1,..,num_vols and if its num_vols idx (the mean), not adding a z to it, so that its A_i(Uz_i + mean_volume)
     # TODO: read in pca_dim as a parameter, instead of this line
-    pca_dim = volumes.shape[0] 
+    pca_dim = pc_volumes.shape[0] 
 
     logger.info("hackily appending a volume here")
-    all_volumes = jnp.vstack([volumes, mean_volume])
+    all_volumes = np.vstack([pc_volumes, mean_volume])
 
     # NOTE: this flag seems like its always on in the simulator, keeping it in the outside loop
     pad_before_ctf = True
