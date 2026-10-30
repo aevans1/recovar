@@ -18,9 +18,8 @@ logger = logging.getLogger(__name__)
 
 def make_test_dataset_from_PCs(
     output_dir,
-    pipeline_dir=None, 
-    asset_size=128,
-    image_size=128,
+    pipeline_dir,
+    image_size=None,
     dataset_params_option="uniform",
     latent_generation_option="samples",
     latent_distribution_path=None,
@@ -33,28 +32,19 @@ def make_test_dataset_from_PCs(
 ):
     if seed is not None:
         np.random.seed(seed)
-    grid_size = image_size
-
     if pipeline_dir is None:
-        ## Load everything from pre-computed assets, PCs from empiar 10345, and load pipeline for getting latent zs
-        if asset_size == 128:
-            volume_folder_input = f"/mnt/home/levans/software/recovar/recovar/assets/PCA_example_10345_downsampled_128"
-            pipeline_dir = "/mnt/home/levans/ceph/recovar_testing/recovar_on_recovar_datasets/10345_downsampled_128"
-        elif asset_size == 256:
-            volume_folder_input = f"/mnt/home/levans/software/recovar/recovar/assets/PCA_example_10345"
-            pipeline_dir = "/mnt/home/levans/ceph/recovar_testing/recovar_on_recovar_datasets/10345"
+        raise ValueError("pipeline_dir is required: source pipeline providing the mean, PCs and latent embeddings")
 
-    else:
-        # TODO: replace "volume_folder_input" below(folder with .mrcs), with a pipeline path, and get mean.mrc, and any number of pcs from an input pipeline, and let user pass it
-        #       Then, just read out asset size from the volume size in the input volumes below
-        raise NotImplementedError("Custom pipelines, with pcs to simulate from...not implemented yet")
+    po = output.PipelineOutput(pipeline_dir)
+    pipeline_grid_size = int(po.get("volume_shape")[0])
+    grid_size = pipeline_grid_size if image_size is None else int(image_size)
+    if grid_size != pipeline_grid_size:
+        raise ValueError(f"image_size={grid_size} must equal the source pipeline grid size {pipeline_grid_size}")
+    voxel_size = float(po.get("voxel_size"))
 
     output_folder = os.path.join(output_dir, "test_dataset")
     output.mkdir_safe(output_folder)
     n_images = int(n_images)
-
-    # Voxel size scales with grid size to keep the same physical extent as the asset_size-px assets.
-    voxel_size = 4.25 * asset_size / grid_size
 
     #---------Define PC space bounds
     # TODO: don't hardcode 2 volumes, let it be variable
@@ -64,11 +54,9 @@ def make_test_dataset_from_PCs(
     logger.info("For now, hardcoding num_points_per_dim=200, since hardcoding dim=2, and 200 is standard elsewhere in library")  
     pca_dim = 2
 
-    logger.info("For now, loaded pipeline_dir is hardcoded as same dir as volume folder input, in future need to load this both from pipeline")
-    po = output.PipelineOutput(pipeline_dir)
     zs_noreg = po.get_embedding_component('latent_coords_noreg', pca_dim)
-    latent_space_bounds = ld.compute_latent_space_bounds(zs_noreg, percentile=1)
-    logger.info(f"original pipeline latent_space_bounds:{latent_space_bounds}")
+    noisy_latent_bounds = ld.compute_latent_space_bounds(zs_noreg, percentile=1)
+    logger.info(f"original pipeline noisy_latent_bounds:{noisy_latent_bounds}")
 
     num_points_per_dim = 200
     num_nodes = num_points_per_dim**pca_dim
@@ -80,9 +68,9 @@ def make_test_dataset_from_PCs(
         if latent_distribution_params_option == "gaussian":
             mean = jnp.zeros(2)
             scale = 1/4  # empirically this makes it so that the PC deviations are 4 stds away
-            std = scale*(latent_space_bounds[:, 1] - latent_space_bounds[:, 0])/2
+            std = scale*(noisy_latent_bounds[:, 1] - noisy_latent_bounds[:, 0])/2
             key = jax.random.key(29838)
-            image_assignments = jax.random.normal(key, shape=(n_images, std.shape[0])) * std + mean
+            true_image_assignments = jax.random.normal(key, shape=(n_images, std.shape[0])) * std + mean
 
         elif latent_distribution_params_option == "two_channels":
             # Simulate from langevin
@@ -99,15 +87,15 @@ def make_test_dataset_from_PCs(
                 U = 2*exp1 - exp2 - exp3 + poly1 + poly2
                 return -beta*U
 
-            image_assignments = simulate_image_assignments(n_images, logdensity_fn, beta=1.0)
+            true_image_assignments = simulate_image_assignments(n_images, logdensity_fn, beta=1.0)
 
         # scale image assignments to have roughly same bounds as the original zs 
-        bounds_image_assignments = ld.compute_latent_space_bounds(image_assignments, percentile=1)
-        rescale = (latent_space_bounds[:, 1] - latent_space_bounds[:, 0]) / (bounds_image_assignments[:, 1] - bounds_image_assignments[:, 0]) 
-        image_assignments = rescale * image_assignments 
-        bounds_image_assignments = ld.compute_latent_space_bounds(image_assignments, percentile=1)
-        logger.info(bounds_image_assignments)
-        logger.info(latent_space_bounds)
+        true_latent_bounds = ld.compute_latent_space_bounds(true_image_assignments, percentile=1)
+        rescale = (noisy_latent_bounds[:, 1] - noisy_latent_bounds[:, 0]) / (true_latent_bounds[:, 1] - true_latent_bounds[:, 0]) 
+        true_image_assignments = rescale * true_image_assignments 
+        true_latent_bounds = ld.compute_latent_space_bounds(true_image_assignments, percentile=1)
+        logger.info(true_latent_bounds)
+        logger.info(noisy_latent_bounds)
 
     elif latent_generation_option == "grid":
         # "grid": samples the latents on the same grid, roughly, that will be used for estimating the density. essentially a histogram
@@ -124,35 +112,49 @@ def make_test_dataset_from_PCs(
         num_points_per_dim = 200
         
         logger.info("For latent grid, transposing to match conventions used to make the input volume distribution") 
-        grids_flat = ld.make_latent_space_grid_from_bounds(latent_space_bounds, num_points_per_dim).astype(jnp.float32)
+        grids_flat = ld.make_latent_space_grid_from_bounds(noisy_latent_bounds, num_points_per_dim).astype(jnp.float32)
         nodes = grids_flat.reshape(num_points_per_dim**pca_dim, grids_flat.shape[-1])
 
         seed = 8393939
         choice_key = jax.random.key(seed)
 
-        image_assignments_indices = jax.random.choice(choice_key, jnp.arange(len(nodes)), shape=(n_images,), p=latent_distribution, mode="high").astype(int)
-        image_assignments = nodes[image_assignments_indices]
+        indices = jax.random.choice(choice_key, jnp.arange(len(nodes)), shape=(n_images,), p=latent_distribution, mode="high").astype(int)
+        true_image_assignments = nodes[indices]
+        true_latent_bounds = noisy_latent_bounds
 
 
-    plt.scatter(image_assignments[:, 0], image_assignments[:, 1], s=1.0)
-    plt.savefig(f"checking_initial_assignments_{latent_generation_option}.png", dpi=300)
+    plt.figure()
+    plt.scatter(true_image_assignments[:, 0], true_image_assignments[:, 1], s=0.1, alpha=0.5)
+    plt.scatter(zs_noreg[:, 0], zs_noreg[:, 1], s=0.1, alpha=0.5)
+    plt.xlim(noisy_latent_bounds[0, 0], noisy_latent_bounds[0, 1])
+    plt.ylim(noisy_latent_bounds[1, 0], noisy_latent_bounds[1, 1])
+    plt.savefig(f"{output_dir}/simulated_true_scatter_on_noisy_bounds.png", dpi=300)
+
+    plt.figure()
+    plt.scatter(true_image_assignments[:, 0], true_image_assignments[:, 1], s=0.1, alpha=0.5)
+    plt.scatter(zs_noreg[:, 0], zs_noreg[:, 1], s=0.1, alpha=0.5)
+    plt.xlim(true_latent_bounds[0, 0], true_latent_bounds[0, 1])
+    plt.ylim(true_latent_bounds[1, 0], true_latent_bounds[1, 1])
+    plt.savefig(f"{output_dir}/simulated_true_scatter_on_true_bounds.png", dpi=300)
+
+
 
     #---------Simulate
     simulator.generate_synthetic_dataset_mix_volumes(
          output_folder=output_folder,
-         latent_space_bounds=latent_space_bounds,
+         latent_space_bounds=noisy_latent_bounds,
          voxel_size=voxel_size,
-         volumes_path_root=volume_folder_input,
+         source_pipeline_dir=pipeline_dir,
          n_images=n_images,
          grid_size=grid_size,
-         image_assignments=image_assignments,
+         n_pcs=pca_dim,
+         image_assignments=true_image_assignments,
          dataset_params_option=dataset_params_option,
          noise_level=noise_level,
          noise_model="radial1",
          put_extra_particles=False,
          percent_outliers=0.0,
          volume_radius=0.7,
-         trailing_zero_format_in_vol_name=True,
          noise_scale_std=noise_scale_std,
          contrast_std=contrast_std,
          disc_type="linear_interp",
@@ -196,15 +198,13 @@ def build_parser():
     
     parser = argparse.ArgumentParser(description="Generate a test dataset for recovar")
     parser.add_argument("output_dir", nargs="?", default=os.getcwd(), help="Output directory for the test dataset")
-    parser.add_argument("--pipeline-dir", default=None, help="pipeline directory with a better explanation later")
+    parser.add_argument("--pipeline-dir", required=True, help="Source pipeline directory providing the mean, PCs and reference latent embeddings")
     parser.add_argument("--noise-level", type=float, default=0.1, help="Noise level for the dataset")
-    parser.add_argument("--asset-size", type=int, help="Voxel size of assets used to generate")
-    parser.add_argument("--n-images", type=int, help="Number of images to generate")
-    parser.add_argument("--image-size", type=int, default=64, help="Image size (default: 64 for 64x64 images)")
+    parser.add_argument("--image-size", type=int, default=None, help="Image size; defaults to the pipeline grid size and must match it")
     parser.add_argument("--latent-generation-option", type=str, default="samples", help="how to generate the latent vectors")
     parser.add_argument("--latent-distribution-path", default=None, help="path to a volume distribution probability vector")
     parser.add_argument(
-        "--volume-input", default=None, help="Optional input volume prefix (e.g. /path/to/vol for vol0000.mrc, ...)"
+        "--n-images", type=int, default=None, help="Number of images to simulate"
     )
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducible dataset generation")
     parser.add_argument("--dataset-params-option", type=str, default="dataset2", help="")
@@ -220,15 +220,14 @@ def main():
     make_test_dataset_from_PCs(
         output_dir=args.output_dir,
         pipeline_dir=args.pipeline_dir,
-        asset_size=args.asset_size,
         image_size=args.image_size,
+        n_images=args.n_images,
         dataset_params_option=args.dataset_params_option,
         latent_generation_option=args.latent_generation_option,
         latent_distribution_path=args.latent_distribution_path,
         noise_level=args.noise_level,
         noise_scale_std=args.noise_scale_std, 
         contrast_std=args.contrast_std,
-        n_images=args.n_images,
         seed=args.seed,
     )
 
