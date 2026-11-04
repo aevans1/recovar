@@ -149,6 +149,7 @@ def estimate_conformational_density_alt(
     idx_weights = info["idx_weights"]
     idx_weights_gap = info["idx_gap"]
     weights_gap = info["weights_gap"]
+    bounds = info["latent_space_bounds"]
     row_labels = [f"iteration {idx} " for idx in idx_weights]
     logger.info("Deconvolution done, size = %s", density.shape)
 
@@ -156,13 +157,17 @@ def estimate_conformational_density_alt(
     output.mkdir_safe(str(all_densities_dir))
     for idx, weights in enumerate(weights_all):
         utils.pickle_dump(
-            {"density": weights, "latent_space_bounds": [], "iteration": idx_weights[idx]},
+            {"density": weights, "latent_space_bounds": bounds, "iteration": idx_weights[idx]},
             str(all_densities_dir / f"deconv_density_alt_{idx}.pkl"),
         )
 
     utils.pickle_dump(
-        {"density": weights_gap, "latent_space_bounds": [], "iteration": idx_weights_gap},
+        {"density": weights_gap, "latent_space_bounds": bounds, "iteration": idx_weights_gap},
         str(data_dir / "deconv_density_alt_gap.pkl"),
+    )
+    utils.pickle_dump(
+        {"density": density, "latent_space_bounds": bounds, "iteration": info["idx_final"]},
+        str(data_dir / "deconv_density_alt_final.pkl"),
     )
 
     calibrate_density.plot_density(

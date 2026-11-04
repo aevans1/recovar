@@ -229,7 +229,15 @@ def multiplicative_gradient(
     weights = (1 / num_nodes) * jnp.ones(num_nodes).astype(jnp.float32)
 
     ## Initialize info tracked
-    info = {"losses": [], "gaps": [], "weights_all": [], "idx_weights": []}
+    info = {
+        "losses": [],
+        "gaps": [],
+        "weights_all": [],
+        "idx_weights": [],
+        "latent_space_bounds": np.asarray(latent_space_bounds),
+        "num_points_per_dim": num_points_per_dim,
+        "pca_dim": pca_dim,
+    }
 
     ## Initialize scaling for gap stopping criteria, and pre-compute log likelihood matrix if not online
     if online:
@@ -297,12 +305,11 @@ def multiplicative_gradient(
     info["idx_final"] = k
     info["losses"] = jnp.stack(info["losses"])
     info["gaps"] = jnp.stack(info["gaps"])
-    if weights_frequency > 0:
-        info["weights_all"] = jnp.stack(info["weights_all"])
-        info["idx_weights"] = jnp.array(info["idx_weights"])
-    else:
-        info["weights_all"] = weights_final
-        info["idx_weights"] = jnp.array(info["idx_final"])
+    if weights_frequency == 0 or len(info["weights_all"]) == 0:
+        info["weights_all"] = [weights_final]
+        info["idx_weights"] = [info["idx_final"]]
+    info["weights_all"] = jnp.stack(info["weights_all"])
+    info["idx_weights"] = jnp.array(info["idx_weights"])
 
     if not reached_gap:
         logger.info("Terminated at max iters: ")
