@@ -220,11 +220,9 @@ def compute_deconvolved_density(
 def plot_density(lbfgsb_sols, density, alphas, function=None, cmap="inferno", cbar_normalize=False):
     from recovar.output.output import sum_over_other
 
-    # Normalize solutions first
-    print(len(lbfgsb_sols))
-    for idx in range(len(lbfgsb_sols)):
-        lbfgsb_sols[idx] /= jnp.sum(lbfgsb_sols[idx])
-    density /= jnp.sum(density)
+     Normalized copies for display only
+    lbfgsb_sols = [sol / jnp.sum(sol) for sol in lbfgsb_sols]
+    density = density / jnp.sum(density)
 
     # Find vmin, vmax for colorbars
     vmin = jnp.min(jnp.stack(lbfgsb_sols))
@@ -318,8 +316,8 @@ def plot_density(lbfgsb_sols, density, alphas, function=None, cmap="inferno", cb
 def plot_individual_density(density, title, cmap="inferno", function=None):
     from recovar.output.output import sum_over_other
 
-    # Normalize solutions first
-    density /= jnp.sum(density)
+    # Normalized copy for display only
+    density = density / jnp.sum(density)
 
     def half_slice_other(density, axes):
         axes = [i for i in range(density.ndim) if i not in axes]
@@ -387,13 +385,13 @@ def plot_density_centers(density, centers):
     matplotlib.rc("font", **font)
 
     n_plots = 1
-    fig, axs = plt.subplots(n_plots, density.ndim, figsize=(density.ndim * 10, n_plots * 6))
+    fig, axs = plt.subplots(n_plots, density.ndim, figsize=(density.ndim * 10, n_plots * 6), squeeze=False)
     global is_first
     is_first = True
 
     def plot_dens(density, title, n_plot):
         if density.ndim == 1:
-            axs[n_plot, 0].imshow(density)
+            axs[n_plot, 0].plot(density)
         else:
             for k in range(1, density.ndim):
                 if k == 1:
@@ -407,14 +405,16 @@ def plot_density_centers(density, centers):
                 for i in range(centers.shape[0]):
                     axs[n_plot, k - 1].annotate(str(i), centers[i, [0, k]] + np.array([0.1, 0.1]))
 
-                to_plot = sum_over_other(density, [0, 2])
-            axs[n_plot, k].imshow(to_plot)
-            axs[n_plot, k].scatter(centers[:, 0], centers[:, 2])
-            for i in range(centers.shape[0]):
-                axs[n_plot, k].annotate(str(i), centers[i, [0, 2]] + np.array([0.1, 0.1]))
+            # Extra panel (PCs 1 vs 2) only exists for 3+ dims, matching plot_density
+            if density.ndim > 2:
+                to_plot = sum_over_other(density, [1, 2])
+                axs[n_plot, k].imshow(to_plot)
+                axs[n_plot, k].scatter(centers[:, 1], centers[:, 2])
+                for i in range(centers.shape[0]):
+                    axs[n_plot, k].annotate(str(i), centers[i, [1, 2]] + np.array([0.1, 0.1]))
 
-            axs[n_plot, k].set_xticklabels([])
-            axs[n_plot, k].set_yticklabels([])
+                axs[n_plot, k].set_xticklabels([])
+                axs[n_plot, k].set_yticklabels([])
 
     # axs[n_plot,0].set_ylabel(name)
 
