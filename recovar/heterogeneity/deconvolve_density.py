@@ -230,7 +230,6 @@ def plot_density(lbfgsb_sols, density, alphas, function=None, cmap="inferno", cb
     vmin = jnp.min(jnp.stack(lbfgsb_sols))
     vmax = jnp.max(jnp.stack(lbfgsb_sols))
 
-
     def half_slice_other(density, axes):
         axes = [i for i in range(density.ndim) if i not in axes]
         axes = np.sort(axes)
@@ -281,12 +280,12 @@ def plot_density(lbfgsb_sols, density, alphas, function=None, cmap="inferno", cb
             axs[n_plot, k - 1].set_yticklabels([])
 
             to_plot = function(density, [0, k])
-            
+
             if cbar_normalize:
                 axs[n_plot, k - 1].imshow(to_plot.T, origin="lower", cmap=cmap, vmin=vmin, vmax=vmax)
             else:
                 axs[n_plot, k - 1].imshow(to_plot.T, origin="lower", cmap=cmap)
-            
+
             if is_first:
                 axs[n_plot, k - 1].set_title(f"PC x={0}, y={k}")
 

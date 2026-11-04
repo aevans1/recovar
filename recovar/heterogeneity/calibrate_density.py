@@ -1,5 +1,4 @@
 import logging
-from functools import partial
 
 import equinox as eqx
 import jax
@@ -7,10 +6,11 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 
-from recovar.heterogeneity import latent_density as ld
 from recovar import utils
+from recovar.heterogeneity import latent_density as ld
 
 logger = logging.getLogger(__name__)
+
 
 ### Methods for "regular" multiplicative gradient #########################
 @jax.jit
@@ -110,6 +110,7 @@ def scaled_gap(grad, weights, scale):
     # return (jnp.amax(grad) - 1) / scale
     return jnp.sum(weights * (grad - 1) ** 2) / scale
 
+
 ### Methods for "online" multiplicative gradient ###############################
 @eqx.filter_jit
 def custom_exp_normalize(arr, axis):
@@ -121,13 +122,15 @@ def custom_exp_normalize(arr, axis):
 def grad_accum(grad, val, c):
     return grad + c * val
 
+
 def compute_grad_and_loss_image_batch(weights, zs_batch, cov_zs_batch, zs_grid, batch_size=1000):
-    
+
     log_likelihood_batch = -1 * ld.compute_latent_log_likelihood_no_batch_no_dets(
-        zs_grid, zs_batch, cov_zs_batch).astype(jnp.float32)
+        zs_grid, zs_batch, cov_zs_batch
+    ).astype(jnp.float32)
     exp_norm = custom_exp_normalize(log_likelihood_batch, axis=1)
-    
-    # NOTE: this is the line where could be replaced with a convolution-type multiplication  
+
+    # NOTE: this is the line where could be replaced with a convolution-type multiplication
     denominator = exp_norm @ weights
     grad_batch = jnp.sum(exp_norm / denominator[:, None], axis=0)
     return grad_batch, denominator.sum()
@@ -150,22 +153,20 @@ def compute_online_grad_and_loss(weights, zs, cov_zs, zs_grid, batch_size_zs=100
         [grad, loss] = grad_and_loss
         zs_chunk = jax.lax.dynamic_slice_in_dim(zs, idx * batch_size_zs, batch_size_zs, axis=0)
         cov_zs_chunk = jax.lax.dynamic_slice_in_dim(cov_zs, idx * batch_size_zs, batch_size_zs, axis=0)
-        grad_val, loss_val = compute_grad_and_loss_image_batch(
-            weights, zs_chunk, cov_zs_chunk, zs_grid)
+        grad_val, loss_val = compute_grad_and_loss_image_batch(weights, zs_chunk, cov_zs_chunk, zs_grid)
         grad = grad_accum(grad, grad_val, 1 / zs.shape[0])
         loss += -(1 / num_data) * jnp.log(loss_val)
         return [grad, loss], None
 
     grad_and_loss_init = [jnp.zeros(zs_grid.shape[0], dtype=jnp.float32), jnp.float32(0.0)]
     grad_and_loss, _ = jax.lax.scan(main_body_fn, grad_and_loss_init, jnp.arange(num_full_chunks))
-    [grad, loss]  = grad_and_loss
-    
+    [grad, loss] = grad_and_loss
+
     ## Computing gradient over last batch of images if any leftover
     if remainder > 0:
         zs_chunk = zs[num_full_chunks * batch_size_zs :]
         cov_zs_chunk = cov_zs[num_full_chunks * batch_size_zs :]
-        grad_val, loss_val = compute_grad_and_loss_image_batch(
-            weights, zs_chunk, cov_zs_chunk, zs_grid)
+        grad_val, loss_val = compute_grad_and_loss_image_batch(weights, zs_chunk, cov_zs_chunk, zs_grid)
         grad = grad_accum(grad, grad_val, 1 / zs.shape[0])
         loss += -(1 / num_data) * jnp.log(loss_val)
 
@@ -186,7 +187,7 @@ def multiplicative_gradient(
     weights_frequency=0,
     diagnostic=False,
     batch_size_zs=10000,
-    ignore_cov_zs=False
+    ignore_cov_zs=False,
 ):
     ## Load up latent image embeddings (zs) and uncertainties (cov_zs)
     coords_entry = "latent_coords_noreg" if noreg else "latent_coords"
@@ -227,45 +228,41 @@ def multiplicative_gradient(
     # NOTE: this should possibly be reshaped to the original grids dimension to allow for convolution-type things
     weights = (1 / num_nodes) * jnp.ones(num_nodes).astype(jnp.float32)
 
-
     ## Initialize info tracked
     info = {"losses": [], "gaps": [], "weights_all": [], "idx_weights": []}
-    
 
     ## Initialize scaling for gap stopping criteria, and pre-compute log likelihood matrix if not online
     if online:
         ## Compute initial gap scale with online gradients
         logger.info("Using online mode for saving memory, recomputing likelihoods per gradient iteration")
 
-        ## TODO: change to more precise control flow here with default options of None 
-        if batch_size_zs == None:
+        ## TODO: change to more precise control flow here with default options of None
+        if batch_size_zs is None:
             batch_size_zs = int(utils.get_latent_density_batch_size(nodes, zs.shape[-1], utils.get_gpu_memory_total()))
             logger.info("batch size of zs: %s", batch_size_zs)
             logger.info("number of nodes: %s", num_nodes)
 
-        grad_init, loss_init = compute_online_grad_and_loss(
-            weights, zs, cov_zs, nodes, batch_size_zs=batch_size_zs)
+        grad_init, loss_init = compute_online_grad_and_loss(weights, zs, cov_zs, nodes, batch_size_zs=batch_size_zs)
         gap_scale = scaled_gap(grad_init, weights, scale=1.0)
     else:
         ## Compute full likelihood matrix, re-use in non-online (full) gradient updates
         log_likelihood = -1 * ld.compute_latent_log_likelihood_no_dets(nodes, zs, cov_zs).astype(jnp.float32)
         likelihood = normalize_log_likeli_to_likeli(log_likelihood)
-        grad_init, loss_init  = compute_grad_and_loss(weights, likelihood)
+        grad_init, loss_init = compute_grad_and_loss(weights, likelihood)
         gap_scale = scaled_gap(grad_init, weights, scale=1.0)
 
     reached_gap = False
     for k in range(max_iterations):
         ## Save weights along the way if computing all the way to max iterations
         if weights_frequency > 0:
-            if k==1 or (k % weights_frequency == 0 and k > 0):
+            if k == 1 or (k % weights_frequency == 0 and k > 0):
                 # NOTE: for now, setting weights frequency to start at iteration 1, not 0
                 info["weights_all"].append(weights.reshape((num_points_per_dim,) * pca_dim))
                 info["idx_weights"].append(k)
 
         ## Update grad and loss
         if online:
-            grad, loss = compute_online_grad_and_loss(
-                weights, zs, cov_zs, nodes, batch_size_zs=batch_size_zs)
+            grad, loss = compute_online_grad_and_loss(weights, zs, cov_zs, nodes, batch_size_zs=batch_size_zs)
         else:
             grad, loss = compute_grad_and_loss(weights, likelihood)
         info["losses"].append(loss)
@@ -273,7 +270,7 @@ def multiplicative_gradient(
         ## Check stopping criterions
         gap = scaled_gap(grad, weights, gap_scale)
         info["gaps"].append(gap)
- 
+
         ## Logger info every 10 iterations
         if k % 10 == 0:
             logger.info(f" iteration {k}, gap: {gap}, loss: {loss}")
@@ -286,7 +283,7 @@ def multiplicative_gradient(
             reached_gap = True
             logger.info(f"reached gap tolerance, at idx: {k}")
             logger.info(f"final gap: {gap}")
-         
+
         ## Check if stopping criteria met
         if reached_gap and not diagnostic:
             logger.info(f"exiting! At iteration: {k}")
@@ -300,7 +297,7 @@ def multiplicative_gradient(
     info["idx_final"] = k
     info["losses"] = jnp.stack(info["losses"])
     info["gaps"] = jnp.stack(info["gaps"])
-    if weights_frequency > 0: 
+    if weights_frequency > 0:
         info["weights_all"] = jnp.stack(info["weights_all"])
         info["idx_weights"] = jnp.array(info["idx_weights"])
     else:
@@ -343,7 +340,7 @@ def plot_density(densities, function=None, cmap="inferno", plots_dir=None, row_l
     # Check if input is a array "list" of densities or a density
     if densities.ndim == 2:
         densities = np.expand_dims(densities, axis=0)
-    
+
     # Find vmin, vmax for colorbars
     vmin = jnp.min(densities)
     vmax = jnp.max(densities)
@@ -386,7 +383,7 @@ def plot_density(densities, function=None, cmap="inferno", plots_dir=None, row_l
             col = 0
             for k in range(1, density.ndim):
                 to_plot = function(density, [0, k])
-                #to_plot = np.flip(to_plot, axis=1) # flip axis to match recovar behavior 
+                # to_plot = np.flip(to_plot, axis=1) # flip axis to match recovar behavior
 
                 if cbar_normalize:
                     axs[row, col].imshow(to_plot.T, cmap=cmap, origin="lower", vmin=vmin, vmax=vmax)

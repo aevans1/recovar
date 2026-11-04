@@ -16,7 +16,6 @@ from recovar import core
 from recovar.core.configs import ForwardModelConfig
 from recovar.data_io import cryoem_dataset, load_utils
 from recovar.reconstruction import noise
-from recovar.heterogeneity import latent_density as ld
 
 CONSTANT_CTF = False
 logger = logging.getLogger(__name__)
@@ -180,7 +179,8 @@ def get_pose_ctf_generator(option):
     elif option == "dataset2":
         return get_params_generator(load_second_dataset_params)
     elif option == "nonuniform":
-        f = lambda x, y=0, z=0: random_sampling_scheme(x, y, z, uniform=False)
+        def f(x, y=0, z=0):
+            random_sampling_scheme(x, y, z, uniform=False)
         return f
     elif option == "kent":
         return kent_sampling_scheme
@@ -582,6 +582,7 @@ def load_volumes_from_folder(volumes_path_root, grid_size, trailing_zero_format_
         volumes /= np.mean(np.linalg.norm(volumes, axis=(-1)))
     return volumes
 
+
 def load_volumes_from_pipeline(pipeline_dir, grid_size, n_pcs=2):
     """Load mean and top PCs from a pipeline as centered Fourier-space volumes.
 
@@ -918,8 +919,6 @@ def generate_simulated_dataset(
     return main_image_stack, ctf_params, rots, trans, simulation_info, voxel_size, tilt_groups
 
 
-
-
 def save_ctf_params(outdir, D: int, ctf_params, voxel_size):
 
     if D % 2 != 0:
@@ -1248,7 +1247,7 @@ def generate_synthetic_dataset_mix_volumes(
     output_folder,
     latent_space_bounds,
     voxel_size,
-    source_pipeline_dir, 
+    source_pipeline_dir,
     n_images,
     outlier_file_input=None,
     grid_size=128,
@@ -1288,16 +1287,18 @@ def generate_synthetic_dataset_mix_volumes(
     from recovar.output import output
 
     output.mkdir_safe(output_folder)
-    #logger.info("Hard coding volume names")
-    #mean_volume, voxel_size = generate_volumes_from_mrcs([volumes_path_root + "/" + "mean.mrc"], grid_size, padding=0)
+    # logger.info("Hard coding volume names")
+    # mean_volume, voxel_size = generate_volumes_from_mrcs([volumes_path_root + "/" + "mean.mrc"], grid_size, padding=0)
     # TODO: this function barely avoids loading the mean volume due to naming convention of mean.mrc, needs to be corrected
-    #volumes = load_volumes_from_folder(volumes_path_root+"/", grid_size, trailing_zero_format_in_vol_name, normalize=False)
+    # volumes = load_volumes_from_folder(volumes_path_root+"/", grid_size, trailing_zero_format_in_vol_name, normalize=False)
 
     logger.info("Loading up mean and u's from some pipline")
-    logger.info("Note: for now, gridsize of simulation has to match that of the pipeline load stuff. in future these will be downsampled if needed")
-    mean_volume, pc_volumes, voxel_size = load_volumes_from_pipeline(source_pipeline_dir, grid_size, n_pcs=n_pcs)  
-    
-    logger.info("getting mean of volumes and mean_volume to divide by their norm, hacky for now.") 
+    logger.info(
+        "Note: for now, gridsize of simulation has to match that of the pipeline load stuff. in future these will be downsampled if needed"
+    )
+    mean_volume, pc_volumes, voxel_size = load_volumes_from_pipeline(source_pipeline_dir, grid_size, n_pcs=n_pcs)
+
+    logger.info("getting mean of volumes and mean_volume to divide by their norm, hacky for now.")
     all_volumes = np.vstack([pc_volumes, mean_volume])
 
     scale_vol = 1 / np.mean(np.linalg.norm(all_volumes, axis=-1))
@@ -1314,18 +1315,50 @@ def generate_synthetic_dataset_mix_volumes(
 
     mrc_file = None
 
-    #logger.info("Doing noise rescaling in mixture volumes with lots of images, to prevent 0 norms?")
+    # logger.info("Doing noise rescaling in mixture volumes with lots of images, to prevent 0 norms?")
     rescale_noise = True
     if rescale_noise:
         # Dont use premultiplied_ctf for
-        main_image_stack, ctf_params, rots, trans, simulation_info, voxel_size, _ = generate_simulated_dataset_mix_volumes(
+        main_image_stack, ctf_params, rots, trans, simulation_info, voxel_size, _ = (
+            generate_simulated_dataset_mix_volumes(
+                mean_volume,
+                pc_volumes,
+                latent_space_bounds,
+                voxel_size,
+                latent_distribution,
+                image_assignments,
+                10000,
+                noise_variance,
+                noise_scale_std,
+                contrast_std,
+                put_extra_particles,
+                percent_outliers=percent_outliers,
+                dataset_param_generator=dataset_param_generator,
+                volume_radius=volume_radius,
+                outlier_volume=outlier_volume,
+                disc_type=disc_type,
+                mrc_file=mrc_file,
+                image_offset_n_std=image_offset_n_std,
+                per_particle_contrast=per_particle_contrast,
+                premultiplied_ctf=False,
+            )
+        )
+        norm_image_square = np.mean(main_image_stack**2)
+        norm_image = norm_image_square
+        noise_variance = noise_variance / (norm_image)
+        pc_volumes = pc_volumes / np.sqrt(norm_image)
+        mean_volume = mean_volume / np.sqrt(norm_image)
+        scale_vol = scale_vol / np.sqrt(norm_image)
+
+    main_image_stack, ctf_params, rots, trans, simulation_info, voxel_size, tilt_groups = (
+        generate_simulated_dataset_mix_volumes(
             mean_volume,
             pc_volumes,
             latent_space_bounds,
             voxel_size,
             latent_distribution,
             image_assignments,
-            10000,
+            n_images,
             noise_variance,
             noise_scale_std,
             contrast_std,
@@ -1336,44 +1369,16 @@ def generate_synthetic_dataset_mix_volumes(
             outlier_volume=outlier_volume,
             disc_type=disc_type,
             mrc_file=mrc_file,
+            n_tilts=n_tilts,
+            dose_per_tilt=dose_per_tilt,
+            angle_per_tilt=angle_per_tilt,
             image_offset_n_std=image_offset_n_std,
             per_particle_contrast=per_particle_contrast,
-            premultiplied_ctf=False,
+            premultiplied_ctf=premultiplied_ctf,
+            noise_increase_per_tilt=noise_increase_per_tilt,
+            percent_tilt_series_outliers=percent_tilt_series_outliers,
+            noise_rng_batch_size=noise_rng_batch_size,
         )
-        norm_image_square = np.mean(main_image_stack**2)
-        norm_image = norm_image_square
-        noise_variance = noise_variance / (norm_image)
-        pc_volumes = pc_volumes / np.sqrt(norm_image)
-        mean_volume = mean_volume / np.sqrt(norm_image)
-        scale_vol = scale_vol / np.sqrt(norm_image)
-
-    main_image_stack, ctf_params, rots, trans, simulation_info, voxel_size, tilt_groups = generate_simulated_dataset_mix_volumes(
-        mean_volume, 
-        pc_volumes,
-        latent_space_bounds,
-        voxel_size,
-        latent_distribution,
-        image_assignments,
-        n_images,
-        noise_variance,
-        noise_scale_std,
-        contrast_std,
-        put_extra_particles,
-        percent_outliers=percent_outliers,
-        dataset_param_generator=dataset_param_generator,
-        volume_radius=volume_radius,
-        outlier_volume=outlier_volume,
-        disc_type=disc_type,
-        mrc_file=mrc_file,
-        n_tilts=n_tilts,
-        dose_per_tilt=dose_per_tilt,
-        angle_per_tilt=angle_per_tilt,
-        image_offset_n_std=image_offset_n_std,
-        per_particle_contrast=per_particle_contrast,
-        premultiplied_ctf=premultiplied_ctf,
-        noise_increase_per_tilt=noise_increase_per_tilt,
-        percent_tilt_series_outliers=percent_tilt_series_outliers,
-        noise_rng_batch_size=noise_rng_batch_size,
     )
 
     # Add additional simulation parameters that weren't set in generate_simulated_dataset
@@ -1435,7 +1440,7 @@ def generate_synthetic_dataset_mix_volumes(
 
 
 def generate_simulated_dataset_mix_volumes(
-    mean_volume, 
+    mean_volume,
     pc_volumes,
     latent_space_bounds,
     voxel_size,
@@ -1478,35 +1483,33 @@ def generate_simulated_dataset_mix_volumes(
     trans *= 0
     per_image_contrast, per_image_noise_scale = generate_contrast_params(n_images, noise_scale_std, contrast_std)
 
-    #----OLD code: Changing from np choice for image assignments, to a prob distribution on R^d 
-    #----New code: the image assignments are preloaded
-    #pca_dim = len(pc_volumes) 
-    #num_points_per_dim = None
-    #if num_points_per_dim is None:
+    # ----OLD code: Changing from np choice for image assignments, to a prob distribution on R^d
+    # ----New code: the image assignments are preloaded
+    # pca_dim = len(pc_volumes)
+    # num_points_per_dim = None
+    # if num_points_per_dim is None:
     #    if pca_dim == 1:
     #        num_points_per_dim = 500
     #    elif pca_dim == 2:
     #        num_points_per_dim = 200
     #    elif pca_dim > 2:
     #        num_points_per_dim = 50
-    
 
-    #logger.info("For latent grid, transposing to match conventions used to make the input volume distribution") 
-    #grids_flat = ld.make_latent_space_grid_from_bounds(latent_space_bounds, num_points_per_dim).astype(jnp.float32)
-    #nodes = grids_flat.reshape(num_points_per_dim**pca_dim, grids_flat.shape[-1])
+    # logger.info("For latent grid, transposing to match conventions used to make the input volume distribution")
+    # grids_flat = ld.make_latent_space_grid_from_bounds(latent_space_bounds, num_points_per_dim).astype(jnp.float32)
+    # nodes = grids_flat.reshape(num_points_per_dim**pca_dim, grids_flat.shape[-1])
 
-    #seed = 8393939
-    #choice_key = jax.random.key(seed)
+    # seed = 8393939
+    # choice_key = jax.random.key(seed)
 
     ## TODO: make sure volume-distribution in latent space has mean 0, maybe also has same variance as eigvals of covar
     ##latent_distribution_shifted = latent_distribution - jnp.mean(points*latent_distribution[:, None], axis=0)
 
     ## TODO: if it matters, instead of using jnp.choice, pass in continuous sampled latent image assignments, e.g from langevin from latent_distribution, with correct scaling
-    #if latent_distribution is None:
+    # if latent_distribution is None:
     #    logger.info("No latent distribution passed, so simulating from uniform distribution on latents")
-    #image_assignments_indices = jax.random.choice(choice_key, jnp.arange(len(nodes)), shape=(n_images,), p=latent_distribution, mode="high").astype(int)
-    #image_assignments = nodes[image_assignments_indices]
-
+    # image_assignments_indices = jax.random.choice(choice_key, jnp.arange(len(nodes)), shape=(n_images,), p=latent_distribution, mode="high").astype(int)
+    # image_assignments = nodes[image_assignments_indices]
 
     if n_tilts > 0:
         raise NotImplementedError("tilt series not supported yet for mix volume simulator")
@@ -1591,7 +1594,7 @@ def generate_simulated_dataset_mix_volumes(
     return main_image_stack, ctf_params, rots, trans, simulation_info, voxel_size, tilt_groups
 
 
-def simulate_data_mix_volumes( 
+def simulate_data_mix_volumes(
     experiment_dataset,
     mean_volume,
     pc_volumes,
@@ -1608,9 +1611,9 @@ def simulate_data_mix_volumes(
     premultiplied_ctf=False,
     noise_rng_batch_size=None,
 ):
-    #----Get some template for noise values?-----
+    # ----Get some template for noise values?-----
     key = jax.random.PRNGKey(seed)
-    
+
     if noise_rng_batch_size is None:
         noise_rng_batch_size = batch_size
     noise_rng_batch_size = utils.safe_batch_size(noise_rng_batch_size)
@@ -1629,23 +1632,22 @@ def simulate_data_mix_volumes(
 
     n_images_done = 0
 
-    #----Adding a fourier space collector/buffer, same size as output array but for complex value-----
+    # ----Adding a fourier space collector/buffer, same size as output array but for complex value-----
     fourier_buffer = output_array.copy().astype("complex64")
 
-    #----My change here: set n_images to be the full amount for the dataset, and indics to be all image indices-----
+    # ----My change here: set n_images to be the full amount for the dataset, and indics to be all image indices-----
     n_images = experiment_dataset.n_images
     img_indices = np.arange(n_images)
-   
+
     # noise stuff
     noise_subkeys = []
     for _ in range(0, int(np.ceil(n_images / noise_rng_batch_size))):
         key, subkey = jax.random.split(key)
         noise_subkeys.append(subkey)
 
-
-    #----Here, making sure mean volume is index num_vols of 0,1,..,num_vols and if its num_vols idx (the mean), not adding a z to it, so that its A_i(Uz_i + mean_volume)
+    # ----Here, making sure mean volume is index num_vols of 0,1,..,num_vols and if its num_vols idx (the mean), not adding a z to it, so that its A_i(Uz_i + mean_volume)
     # TODO: read in pca_dim as a parameter, instead of this line
-    pca_dim = pc_volumes.shape[0] 
+    pca_dim = pc_volumes.shape[0]
 
     logger.info("hackily appending a volume here")
     all_volumes = np.vstack([pc_volumes, mean_volume])
@@ -1659,7 +1661,7 @@ def simulate_data_mix_volumes(
         else:
             logger.info("Simulating from mean volume")
 
-        #----Simulate a volume-----
+        # ----Simulate a volume-----
         if disc_type == "nufft":
             vol_real = fourier_transform_utils.get_idft3(vol.reshape(experiment_dataset.volume_shape))
         elif "cubic" in disc_type:
@@ -1669,7 +1671,6 @@ def simulate_data_mix_volumes(
         else:
             volume = vol
 
-        
         for k in range(0, int(np.ceil(n_images / batch_size))):
             batch_st = int(k * batch_size)
             batch_end = int(np.min([(k + 1) * batch_size, n_images]))
@@ -1728,42 +1729,41 @@ def simulate_data_mix_volumes(
 
             else:
                 raise ValueError("Invalid disc_type")
-            #----Add projections of volume, to images at those indices-----
+            # ----Add projections of volume, to images at those indices-----
             # (this builds up images from projections of a set of volumes)
 
-            #Reshaping that's needed, usually happens at a ctf step
+            # Reshaping that's needed, usually happens at a ctf step
             image_shape = np.array(experiment_dataset.image_shape)
-            
+
             if vol_idx < pca_dim:
                 # We aren't on the mean volume, increment as usual
-                fourier_buffer[indices] += image_assignments[indices, vol_idx, None, None]*np.array(images_batch.reshape([-1, *image_shape]))
+                fourier_buffer[indices] += image_assignments[indices, vol_idx, None, None] * np.array(
+                    images_batch.reshape([-1, *image_shape])
+                )
             else:
                 # this is the last index, the mean volume, don't combine with image_assignments coeffs.
                 fourier_buffer[indices] += np.array(images_batch.reshape([-1, *image_shape]))
- 
 
-    #---- All CTF and Noise----            
-    #---- Here, passing through images again to add CTF and noise----            
+    # ---- All CTF and Noise----
+    # ---- Here, passing through images again to add CTF and noise----
     for k in range(0, int(np.ceil(n_images / batch_size))):
         batch_st = int(k * batch_size)
         batch_end = int(np.min([(k + 1) * batch_size, n_images]))
         indices = img_indices[batch_st:batch_end]
-        
-        #---- Reloading pre-computed projections----            
+
+        # ---- Reloading pre-computed projections----
         images_batch = fourier_buffer[indices]
 
         _, translations, ctf_params = experiment_dataset.metadata.get_batch(indices)
         translations = np.zeros_like(translations) if pad_before_translate else translations
 
-
         # IF this block is on, we did not apply CTF above, and pad_before_ctf=True
         # previously, this only ran if pad_before_CTF=True, but its hard coded in the corresponding simulate_ anyway
         from recovar.core import padding
+
         upsample_factor = 2
         upsampled_shape = tuple(np.array(experiment_dataset.image_shape) * upsample_factor)
-        upsampled_CTF = experiment_dataset.ctf_evaluator(
-            ctf_params, upsampled_shape, experiment_dataset.voxel_size
-        )
+        upsampled_CTF = experiment_dataset.ctf_evaluator(ctf_params, upsampled_shape, experiment_dataset.voxel_size)
         images_batch = padding.pad_images_fourier_domain(
             images_batch, experiment_dataset.image_shape, experiment_dataset.grid_size * (upsample_factor - 1)
         )

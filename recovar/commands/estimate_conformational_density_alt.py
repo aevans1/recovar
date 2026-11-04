@@ -53,17 +53,9 @@ def parse_args():
         default=None,
         help="Number of discretization points in each dimension for the grid density estimation. Default = 50 for dim >3, 100 for dim = 3, 200 for dim = 2",
     )
+    parser.add_argument("--tol", type=float, default=1e-4, help="Sets stopping tolerance for density estimation.")
     parser.add_argument(
-        "--tol",
-        type=float,
-        default=1e-4,
-        help="Sets stopping tolerance for density estimation."   
-    )
-    parser.add_argument(
-        "--max_iterations",
-        type=int,
-        default=100,
-        help="Sets max number of iterations for density estimation."   
+        "--max_iterations", type=int, default=100, help="Sets max number of iterations for density estimation."
     )
     parser.add_argument(
         "--online",
@@ -75,7 +67,7 @@ def parse_args():
         "--weights_frequency",
         type=int,
         default=0,
-        help="Sets frequency that intermediate weight outputs are saved in density estimation. At default of 0, no intermediates are saved."   
+        help="Sets frequency that intermediate weight outputs are saved in density estimation. At default of 0, no intermediates are saved.",
     )
     parser.add_argument(
         "--diagnostic",
@@ -108,7 +100,7 @@ def estimate_conformational_density_alt(
 ):
 
     # Load pipeline
-    logger.info(f"online? {online}") 
+    logger.info(f"online? {online}")
     recovar_result_dir = Path(recovar_result_dir).expanduser().resolve()
     if not recovar_result_dir.exists():
         raise FileNotFoundError(f"recovar_result_dir {recovar_result_dir} does not exist")
@@ -136,7 +128,7 @@ def estimate_conformational_density_alt(
     output.mkdir_safe(str(plots_dir))
     output.mkdir_safe(str(data_dir))
 
-    # 
+    #
     density, info = calibrate_density.multiplicative_gradient(
         pipeline_output,
         pca_dim=pca_dim,
@@ -173,7 +165,9 @@ def estimate_conformational_density_alt(
         str(data_dir / "deconv_density_alt_gap.pkl"),
     )
 
-    calibrate_density.plot_density(weights_gap, plots_dir=plots_dir, cbar_normalize=False, row_labels=[f"iteration {idx_weights_gap}"])
+    calibrate_density.plot_density(
+        weights_gap, plots_dir=plots_dir, cbar_normalize=False, row_labels=[f"iteration {idx_weights_gap}"]
+    )
     calibrate_density.plot_density(weights_all, plots_dir=plots_dir, row_labels=row_labels, cbar_normalize=False)
     calibrate_density.plot_info(losses, gaps, plots_dir=plots_dir)
     plt.close()
