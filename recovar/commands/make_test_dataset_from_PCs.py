@@ -221,7 +221,7 @@ def build_parser():
     parser.add_argument(
         "--latent-distribution-path", default=None, help="path to a volume distribution probability vector"
     )
-    parser.add_argument("--n-images", type=int, default=None, help="Number of images to simulate")
+    parser.add_argument("--n-images", type=int, required=True, help="Number of images to simulate")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducible dataset generation")
     parser.add_argument("--dataset-params-option", type=str, default="dataset2", help="")
     parser.add_argument("--noise-scale-std", type=float, default=0.0, help="")

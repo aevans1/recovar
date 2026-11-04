@@ -179,8 +179,10 @@ def get_pose_ctf_generator(option):
     elif option == "dataset2":
         return get_params_generator(load_second_dataset_params)
     elif option == "nonuniform":
+
         def f(x, y=0, z=0):
-            random_sampling_scheme(x, y, z, uniform=False)
+            return random_sampling_scheme(x, y, z, uniform=False)
+
         return f
     elif option == "kent":
         return kent_sampling_scheme
@@ -1318,6 +1320,8 @@ def generate_synthetic_dataset_mix_volumes(
     # logger.info("Doing noise rescaling in mixture volumes with lots of images, to prevent 0 norms?")
     rescale_noise = True
     if rescale_noise:
+        # Calibrate on at most 10k images, using their own latents (avoids out-of-range indices for small n_images)
+        n_cal = min(n_images, 10000)
         # Dont use premultiplied_ctf for
         main_image_stack, ctf_params, rots, trans, simulation_info, voxel_size, _ = (
             generate_simulated_dataset_mix_volumes(
@@ -1326,8 +1330,8 @@ def generate_synthetic_dataset_mix_volumes(
                 latent_space_bounds,
                 voxel_size,
                 latent_distribution,
-                image_assignments,
-                10000,
+                image_assignments[:n_cal],
+                n_cal,
                 noise_variance,
                 noise_scale_std,
                 contrast_std,
