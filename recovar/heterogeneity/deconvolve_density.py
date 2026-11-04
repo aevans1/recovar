@@ -220,7 +220,7 @@ def compute_deconvolved_density(
 def plot_density(lbfgsb_sols, density, alphas, function=None, cmap="inferno", cbar_normalize=False):
     from recovar.output.output import sum_over_other
 
-     Normalized copies for display only
+    # Normalized copies for display only
     lbfgsb_sols = [sol / jnp.sum(sol) for sol in lbfgsb_sols]
     density = density / jnp.sum(density)
 
