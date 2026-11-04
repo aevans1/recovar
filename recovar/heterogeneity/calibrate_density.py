@@ -133,7 +133,7 @@ def compute_grad_and_loss_image_batch(weights, zs_batch, cov_zs_batch, zs_grid, 
     # NOTE: this is the line where could be replaced with a convolution-type multiplication
     denominator = exp_norm @ weights
     grad_batch = jnp.sum(exp_norm / denominator[:, None], axis=0)
-    return grad_batch, denominator.sum()
+    return grad_batch, jnp.sum(jnp.log(denominator))
 
 
 @eqx.filter_jit
@@ -155,7 +155,7 @@ def compute_online_grad_and_loss(weights, zs, cov_zs, zs_grid, batch_size_zs=100
         cov_zs_chunk = jax.lax.dynamic_slice_in_dim(cov_zs, idx * batch_size_zs, batch_size_zs, axis=0)
         grad_val, loss_val = compute_grad_and_loss_image_batch(weights, zs_chunk, cov_zs_chunk, zs_grid)
         grad = grad_accum(grad, grad_val, 1 / zs.shape[0])
-        loss += -(1 / num_data) * jnp.log(loss_val)
+        loss += -(1 / num_data) * loss_val
         return [grad, loss], None
 
     grad_and_loss_init = [jnp.zeros(zs_grid.shape[0], dtype=jnp.float32), jnp.float32(0.0)]
@@ -168,7 +168,7 @@ def compute_online_grad_and_loss(weights, zs, cov_zs, zs_grid, batch_size_zs=100
         cov_zs_chunk = cov_zs[num_full_chunks * batch_size_zs :]
         grad_val, loss_val = compute_grad_and_loss_image_batch(weights, zs_chunk, cov_zs_chunk, zs_grid)
         grad = grad_accum(grad, grad_val, 1 / zs.shape[0])
-        loss += -(1 / num_data) * jnp.log(loss_val)
+        loss += -(1 / num_data) * loss_val
 
     return grad, loss
 
