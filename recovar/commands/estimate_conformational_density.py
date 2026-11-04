@@ -143,6 +143,7 @@ def estimate_conformational_density(
     # Plot knee density by itself
     deconvolve_density.plot_individual_density(lbfgsb_sols[knee_idx], "density knee")
     plt.savefig(str(plots_dir / "density_knee.png"))
+    plt.close()
 
     all_densities_dir = data_dir / "all_densities"
     output.mkdir_safe(str(all_densities_dir))
