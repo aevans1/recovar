@@ -12,7 +12,7 @@ import numpy as np
 
 from recovar.heterogeneity import latent_density as ld
 from recovar.output import output
-from recovar.simulation import simulator
+from recovar.simulation import mix_volumes_simulator
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +143,7 @@ def make_test_dataset_from_PCs(
     plt.savefig(f"{output_dir}/simulated_true_scatter_on_true_bounds.png", dpi=300)
 
     # ---------Simulate
-    simulator.generate_synthetic_dataset_mix_volumes(
+    mix_volumes_simulator.generate_synthetic_dataset_mix_volumes(
         output_folder=output_folder,
         latent_space_bounds=noisy_latent_bounds,
         voxel_size=voxel_size,
