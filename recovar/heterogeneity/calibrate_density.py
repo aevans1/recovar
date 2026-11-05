@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from recovar import utils
+from recovar.heterogeneity import deconvolve_density
 from recovar.heterogeneity import latent_density as ld
 
 logger = logging.getLogger(__name__)
@@ -340,84 +341,19 @@ def plot_info(losses, gaps, plots_dir=None):
         plt.savefig(str(plots_dir / "gaps.png"))
 
 
-# TODO: normalize colorbars? This isn't done in deconvolve_density, but maybe should be done for both?
 def plot_density(densities, function=None, cmap="inferno", plots_dir=None, row_labels=None, cbar_normalize=False):
-    from recovar.output.output import sum_over_other
-
     # Check if input is a array "list" of densities or a density
     if densities.ndim == 2:
         densities = np.expand_dims(densities, axis=0)
 
-    # Find vmin, vmax for colorbars
-    vmin = jnp.min(densities)
-    vmax = jnp.max(densities)
-
-    def half_slice_other(density, axes):
-        other_axes = sorted([i for i in range(density.ndim) if i not in axes], reverse=True)
-        for i in other_axes:
-            density = np.take(density, density.shape[i] // 2, axis=i)
-        return density
-
-    function = half_slice_other if function == "slice" else function
-    function = sum_over_other if function is None else function
-
-    font = {"weight": "bold", "size": 22}
-    import matplotlib
-
-    matplotlib.rc("font", **font)
-
-    n_rows = densities.shape[0]
-    ndim = densities[0].ndim
-    if ndim == 1:
-        n_cols = 1
-    else:
-        n_pairs = ndim - 1
-        n_extra = 1 if ndim > 2 else 0
-        n_cols = n_pairs + n_extra
-
-    fig, axs = plt.subplots(n_rows, n_cols, figsize=(n_cols * 5, n_rows * 5), squeeze=False)
-    for row, density in enumerate(densities):
-        if density.ndim == 1:
-            axs[row, 0].plot(density)
-            axs[row, 0].set_title("PC 0") if row == 0 else None
-            axs[row, 0].set_xticklabels([])
-            axs[row, 0].set_yticklabels([])
-            if row_labels is not None:
-                axs[row, 0].set_ylabel(row_labels[row])
-            elif row == 0:
-                axs[row, 0].set_ylabel("MG density")
-        else:
-            col = 0
-            for k in range(1, density.ndim):
-                to_plot = function(density, [0, k])
-                # to_plot = np.flip(to_plot, axis=1) # flip axis to match recovar behavior
-
-                if cbar_normalize:
-                    axs[row, col].imshow(to_plot.T, cmap=cmap, origin="lower", vmin=vmin, vmax=vmax)
-                else:
-                    axs[row, col].imshow(to_plot.T, cmap=cmap, origin="lower")
-                if row == 0:
-                    axs[row, col].set_title(f"PC x=0, y={k}")
-                axs[row, col].set_xticklabels([])
-                axs[row, col].set_yticklabels([])
-                if col == 0:
-                    if row_labels is not None:
-                        axs[row, col].set_ylabel(row_labels[row])
-                    elif row == 0:
-                        axs[row, col].set_ylabel("MG density")
-                col += 1
-
-            if density.ndim > 2:
-                to_plot = function(density, [1, 2])
-                if cbar_normalize:
-                    axs[row, col].imshow(to_plot.T, cmap=cmap, origin="lower", vmin=vmin, vmax=vmax)
-                else:
-                    axs[row, col].imshow(to_plot.T, cmap=cmap, origin="lower")
-                if row == 0:
-                    axs[row, col].set_title("PC x=1, y=2")
-                axs[row, col].set_xticklabels([])
-                axs[row, col].set_yticklabels([])
-
+    fig, axs = deconvolve_density.plot_density_grid(
+        densities,
+        row_labels=row_labels,
+        default_label="MG density",
+        function=function,
+        cmap=cmap,
+        cbar_normalize=cbar_normalize,
+    )
     plt.subplots_adjust(wspace=0.05, hspace=0.1)
     if plots_dir is not None:
         if len(densities) == 1:

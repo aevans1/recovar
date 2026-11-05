@@ -217,163 +217,99 @@ def compute_deconvolved_density(
     return lbfgsb_sols, cost, reg_cost, alphas
 
 
-def plot_density(lbfgsb_sols, density, alphas, function=None, cmap="inferno", cbar_normalize=False):
+def _half_slice_other(density, axes):
+    """Take middle slice along every axis not in axes."""
+    other_axes = sorted([i for i in range(density.ndim) if i not in axes], reverse=True)
+    for i in other_axes:
+        density = np.take(density, density.shape[i] // 2, axis=i)
+    return density
+
+
+def plot_density_grid(
+    densities,
+    row_labels=None,
+    default_label=None,
+    function=None,
+    cmap="inferno",
+    cbar_normalize=False,
+    vmin=None,
+    vmax=None,
+):
+    """Plot densities as rows of 2D views."""
     from recovar.output.output import sum_over_other
 
-    # Normalized copies for display only
+    densities = [np.asarray(d) for d in densities]
+    if vmin is None:
+        vmin = min(np.min(d) for d in densities)
+    if vmax is None:
+        vmax = max(np.max(d) for d in densities)
+
+    function = _half_slice_other if function == "slice" else function
+    function = sum_over_other if function is None else function
+
+    import matplotlib
+
+    matplotlib.rc("font", **{"weight": "bold", "size": 22})
+
+    ndim = densities[0].ndim
+    n_cols = 1 if ndim == 1 else (ndim - 1) + (1 if ndim > 2 else 0)
+    n_rows = len(densities)
+    fig, axs = plt.subplots(n_rows, n_cols, figsize=(n_cols * 5, n_rows * 5), squeeze=False)
+
+    imshow_kwargs = {"origin": "lower", "cmap": cmap}
+    if cbar_normalize:
+        imshow_kwargs.update(vmin=vmin, vmax=vmax)
+
+    for row, density in enumerate(densities):
+        label = row_labels[row] if row_labels is not None else (default_label if row == 0 else None)
+        if density.ndim == 1:
+            panels = [None]
+        else:
+            panels = [(0, k) for k in range(1, density.ndim)] + ([(1, 2)] if density.ndim > 2 else [])
+        for col, pair in enumerate(panels):
+            ax = axs[row, col]
+            if pair is None:
+                ax.plot(density)
+                title = "PC x=0"
+            else:
+                ax.imshow(function(density, list(pair)).T, **imshow_kwargs)
+                title = f"PC x={pair[0]}, y={pair[1]}"
+            if row == 0:
+                ax.set_title(title)
+            ax.set_xticklabels([])
+            ax.set_yticklabels([])
+        if label is not None:
+            axs[row, 0].set_ylabel(label)
+    return fig, axs
+
+
+def plot_density(lbfgsb_sols, density, alphas, function=None, cmap="inferno", cbar_normalize=False):
     lbfgsb_sols = [sol / jnp.sum(sol) for sol in lbfgsb_sols]
     density = density / jnp.sum(density)
 
-    # Find vmin, vmax for colorbars
+    # Shared colorbar range comes from the deconvolved solutions only
     vmin = jnp.min(jnp.stack(lbfgsb_sols))
     vmax = jnp.max(jnp.stack(lbfgsb_sols))
 
-    def half_slice_other(density, axes):
-        axes = [i for i in range(density.ndim) if i not in axes]
-        axes = np.sort(axes)
-        for i in range(len(axes) - 1, -1, -1):
-            density = np.take(density, density.shape[0] // 2, axis=axes[i])
-        return density
-
-    function = half_slice_other if function == "slice" else function
-    function = sum_over_other if function is None else function
-
-    plt.rcParams.update({})
-    font = {"weight": "bold", "size": 22}
-    import matplotlib
-
-    matplotlib.rc("font", **font)
-
-    ndim = density.ndim
-    if ndim == 1:
-        n_cols = 1
-    else:
-        n_pairs = ndim - 1
-        n_extra = 1 if ndim > 2 else 0
-        n_cols = n_pairs + n_extra
-
-    n_plots = len(lbfgsb_sols) + 1
-
-    fig, axs = plt.subplots(n_plots, n_cols, figsize=(n_cols * 5, n_plots * 5), squeeze=False)
-    global is_first
-    is_first = True
-
-    def plot_dens(density, title, n_plot, first=False):
-        density = np.asarray(density)
-        global is_first
-        if density.ndim == 1:
-            axs[n_plot, 0].plot(density)
-            axs[n_plot, 0].set_title(title)
-            axs[n_plot, 0].set_xticklabels([])
-            axs[n_plot, 0].set_yticklabels([])
-            if is_first:
-                axs[n_plot, 0].set_title(f"PC x={0}")
-            axs[n_plot, 0].set_ylabel(title)
-            return
-
-        for k in range(1, density.ndim):
-            if k == 1:
-                axs[n_plot, k - 1].set_ylabel(title)
-            axs[n_plot, k - 1].set_xticklabels([])
-            axs[n_plot, k - 1].set_yticklabels([])
-
-            to_plot = function(density, [0, k])
-
-            if cbar_normalize:
-                axs[n_plot, k - 1].imshow(to_plot.T, origin="lower", cmap=cmap, vmin=vmin, vmax=vmax)
-            else:
-                axs[n_plot, k - 1].imshow(to_plot.T, origin="lower", cmap=cmap)
-
-            if is_first:
-                axs[n_plot, k - 1].set_title(f"PC x={0}, y={k}")
-
-        if density.ndim > 2:
-            to_plot = function(density, [1, 2])
-            if cbar_normalize:
-                axs[n_plot, k].imshow(to_plot.T, origin="lower", cmap=cmap, vmin=vmin, vmax=vmax)
-            else:
-                axs[n_plot, k].imshow(to_plot.T, origin="lower", cmap=cmap)
-
-            axs[n_plot, k].set_xticklabels([])
-            axs[n_plot, k].set_yticklabels([])
-            if is_first:
-                axs[n_plot, k].set_title(f"PC x={1}, y={2}")
-        is_first = False
-
-    # axs[n_plot,0].set_ylabel(name)
-
-    plot_dens(density, "raw density", 0)
-
-    for alpha_idx, alpha in enumerate(alphas):
-        lbfgsb_sol = lbfgsb_sols[alpha_idx]
-        plot_dens(lbfgsb_sol, r"a" + f"[{alpha_idx}]={alpha:.1e}", alpha_idx + 1)
+    row_labels = ["raw density"] + [r"a" + f"[{alpha_idx}]={alpha:.1e}" for alpha_idx, alpha in enumerate(alphas)]
+    fig, axs = plot_density_grid(
+        [density, *lbfgsb_sols[: len(alphas)]],
+        row_labels=row_labels,
+        function=function,
+        cmap=cmap,
+        cbar_normalize=cbar_normalize,
+        vmin=vmin,
+        vmax=vmax,
+    )
     plt.subplots_adjust(wspace=0, hspace=0)
+    return fig, axs
 
 
-# TODO: re-write plotting densities above so that this function is unnecessary.
-# Right now, this function is to plot an individual density instead of from a list.
-# Nearly copy and pasted from plot_dens above
 def plot_individual_density(density, title, cmap="inferno", function=None):
-    from recovar.output.output import sum_over_other
-
-    # Normalized copy for display only
     density = density / jnp.sum(density)
-
-    def half_slice_other(density, axes):
-        axes = [i for i in range(density.ndim) if i not in axes]
-        axes = np.sort(axes)
-        for i in range(len(axes) - 1, -1, -1):
-            density = np.take(density, density.shape[0] // 2, axis=axes[i])
-        return density
-
-    function = half_slice_other if function == "slice" else function
-    function = sum_over_other if function is None else function
-
-    plt.rcParams.update({})
-    font = {"weight": "bold", "size": 22}
-    import matplotlib
-
-    matplotlib.rc("font", **font)
-
-    ndim = density.ndim
-    if ndim == 1:
-        n_cols = 1
-    else:
-        n_pairs = ndim - 1
-        n_extra = 1 if ndim > 2 else 0
-        n_cols = n_pairs + n_extra
-
-    n_plot = 1
-
-    fig, axs = plt.subplots(n_plot, n_cols, figsize=(n_cols * 5, n_plot * 5), squeeze=False)
-
-    density = np.asarray(density)
-    if density.ndim == 1:
-        axs[0, 0].plot(density)
-        axs[0, 0].set_title(title)
-        axs[0, 0].set_xticklabels([])
-        axs[0, 0].set_yticklabels([])
-        axs[0, 0].set_title(f"PC x={0}")
-        axs[0, 0].set_ylabel(title)
-        return
-
-    for k in range(1, density.ndim):
-        if k == 1:
-            axs[0, k - 1].set_ylabel(title)
-        axs[0, k - 1].set_xticklabels([])
-        axs[0, k - 1].set_yticklabels([])
-
-        to_plot = function(density, [0, k])
-        axs[0, k - 1].imshow(to_plot.T, origin="lower", cmap=cmap)
-        axs[0, k - 1].set_title(f"PC x={0}, y={k}")
-
-    if density.ndim > 2:
-        to_plot = function(density, [1, 2])
-        axs[0, k].imshow(to_plot.T, origin="lower", cmap=cmap)
-        axs[0, k].set_xticklabels([])
-        axs[0, k].set_yticklabels([])
-        axs[0, k].set_title(f"PC x={1}, y={2}")
+    fig, axs = plot_density_grid([density], row_labels=[title], function=function, cmap=cmap)
     plt.subplots_adjust(wspace=0, hspace=0)
+    return fig, axs
 
 
 def plot_density_centers(density, centers):
